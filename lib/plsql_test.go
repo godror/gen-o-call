@@ -1,4 +1,4 @@
-package oracall
+package genocall
 
 import (
 	"testing"

@@ -1,20 +1,10 @@
 /*
 Copyright 2013 Tamás Gulácsi
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-       http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+// SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
 */
 
-package oracall
+package genocall
 
 import (
 	"bytes"
@@ -26,8 +16,8 @@ import (
 	"strings"
 	"text/template"
 
-	errors "golang.org/x/xerrors"
 	"github.com/godror/godror"
+	errors "golang.org/x/xerrors"
 )
 
 // MaxTableSize is the maximum size of the array elements
@@ -94,7 +84,7 @@ func (fun Function) PlsqlBlock(checkName string) (plsql, callFun string) {
 
 	hasCursorOut := fun.HasCursorOut()
 	if hasCursorOut {
-		fmt.Fprintf(callBuf, `func (s *oracallServer) %s(input *pb.%s, stream pb.%s_%sServer) (err error) {
+		fmt.Fprintf(callBuf, `func (s *genocallServer) %s(input *pb.%s, stream pb.%s_%sServer) (err error) {
 			ctx := stream.Context()
 			%s
 			output := new(pb.%s)
@@ -105,7 +95,7 @@ func (fun Function) PlsqlBlock(checkName string) (plsql, callFun string) {
 			CamelCase(fun.getStructName(true, false)),
 		)
 	} else {
-		fmt.Fprintf(callBuf, `func (s *oracallServer) %s(ctx context.Context, input *pb.%s) (output *pb.%s, err error) {
+		fmt.Fprintf(callBuf, `func (s *genocallServer) %s(ctx context.Context, input *pb.%s) (output *pb.%s, err error) {
 		%s
 		output = new(pb.%s)
 		iterators := make([]iterator, 0, 1) // just temporary
@@ -355,7 +345,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 	if repl := fun.Replacement; repl != nil {
 		decls = append(decls, "v_in CLOB := :1;")
 		convIn = append(convIn,
-			"inCLOB := oracall.Buffers.Get(); defer oracall.Buffers.Put(inCLOB)",
+			"inCLOB := genocall.Buffers.Get(); defer genocall.Buffers.Put(inCLOB)",
 			"var outCLOB string",
 		)
 		if fun.ReplacementIsJSON {

@@ -32,9 +32,9 @@ import (
 	"time"
 
 	"github.com/antzucaro/matchr"
-	"github.com/kylelemons/godebug/pretty"
-	oracall "github.com/tgulacsi/oracall/lib"
+	genocall "github.com/godror/gen-o-call/lib"
 	_ "github.com/godror/godror"
+	"github.com/kylelemons/godebug/pretty"
 )
 
 var (
@@ -103,7 +103,7 @@ func TestGenSimple(t *testing.T) {
 	} {
 		todo := todo
 		t.Run(todo.Name, func(t *testing.T) {
-			got := runTest(t, outFn, "-connect="+*flagConnect, oracall.CamelCase(todo.Name), todo.In)
+			got := runTest(t, outFn, "-connect="+*flagConnect, genocall.CamelCase(todo.Name), todo.In)
 			todo.Await = strings.TrimSpace(todo.Await)
 			if strings.Contains(todo.Await, "{{NOW}}") {
 				todo.Await = strings.Replace(todo.Await,
@@ -164,7 +164,7 @@ func TestGenRec(t *testing.T) {
 }
 
 func createStoredProc(t *testing.T) {
-	compile(t, `CREATE OR REPLACE PACKAGE TST_oracall AS
+	compile(t, `CREATE OR REPLACE PACKAGE TST_genocall AS
 TYPE num_tab_typ IS TABLE OF NUMBER INDEX BY PLS_INTEGER;
 
 TYPE mix_rec_typ IS RECORD (num NUMBER, dt DATE, text VARCHAR2(1000));
@@ -328,9 +328,9 @@ FUNCTION rec_tab_in(tab IN mix_tab_typ) RETURN VARCHAR2;
                                p_hiba_kod OUT PLS_INTEGER,
                                p_hiba_szov OUT VARCHAR2);
 
-END TST_oracall;`)
+END TST_genocall;`)
 
-	compile(t, `CREATE OR REPLACE PACKAGE BODY TST_oracall AS
+	compile(t, `CREATE OR REPLACE PACKAGE BODY TST_genocall AS
 PROCEDURE simple_char_in(txt IN VARCHAR2) IS
   v_txt VARCHAR2(1000) := SUBSTR(txt, 1, 100);
 BEGIN NULL; END simple_char_in;
@@ -482,7 +482,7 @@ END sum_nums;
     p_hiba_kod := 0; p_hiba_szov := NULL;
   END rec_sendPreOffer_31101;
 
-END TST_oracall;`)
+END TST_genocall;`)
 }
 
 func compile(t *testing.T, qry string) {
@@ -498,7 +498,7 @@ func compile(t *testing.T, qry string) {
 
 	rows, err := db.Query(`SELECT line||'/'||position||': '||text
           FROM user_errors WHERE type = :1 AND name = :2`,
-		typ, "TST_ORACALL")
+		typ, "TST_genocall")
 	if err != nil {
 		t.Fatalf("error querying errors: %v", err)
 	}
@@ -537,11 +537,11 @@ func build(t *testing.T) {
 
 func generateAndBuild(t *testing.T, prefix string) (outFn string) {
 	runCommand(t, "sh", "-c",
-		"oracall -connect='"+*flagConnect+"' -pb-out=github.com/tgulacsi/oracall/testdata/integration_test/pb:pb"+
-			" TST_ORACALL."+strings.ToUpper(prefix)+"%"+
+		"gen-o-call -connect='"+*flagConnect+"' -pb-out=github.com/godror/gen-o-call/testdata/integration_test/pb:pb"+
+			" TST_genocall."+strings.ToUpper(prefix)+"%"+
 			" >./testdata/integration_test/generated_functions.go")
 
-	if outFh, err := ioutil.TempFile("", "oracall-integration_test"); err != nil {
+	if outFh, err := ioutil.TempFile("", "gen-o-call-integration_test"); err != nil {
 		t.Errorf("cannot create temp file: %v", err)
 		t.FailNow()
 	} else {

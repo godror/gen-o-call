@@ -1,4 +1,8 @@
-package orasrv
+// Copyright 2019 Tamás Gulácsi
+//
+// SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
+
+package orsrv
 
 import (
 	"context"
@@ -10,9 +14,9 @@ import (
 	"time"
 
 	"github.com/LK4D4/joincontext"
+	genocall "github.com/godror/gen-o-call/lib"
 	"github.com/gogo/protobuf/proto"
 	bp "github.com/tgulacsi/go/bufpool"
-	oracall "github.com/tgulacsi/oracall/lib"
 	errors "golang.org/x/xerrors"
 
 	"github.com/go-kit/kit/log"
@@ -180,7 +184,7 @@ func StatusError(err error) error {
 	var sc interface {
 		Code() codes.Code
 	}
-	if errors.Is(err, oracall.ErrInvalidArgument) {
+	if errors.Is(err, genocall.ErrInvalidArgument) {
 		code = codes.InvalidArgument
 	} else if errors.As(err, &sc) {
 		code = sc.Code()

@@ -1,7 +1,7 @@
 *~*
 .dsn
 minimal
-oracall
+gen-o-call
 integration_test
 db_web
 function.py

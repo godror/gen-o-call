@@ -15,9 +15,9 @@ limitations under the License.
 */
 
 /*
-Package main for minimal is a minimal example for oracall usage
+Package main for minimal is a minimal example for gen-o-call usage
 
-    oracall <one.csv >examples/minimal/generated_functions.go \
+    gen-o-call <one.csv >examples/minimal/generated_functions.go \
     && go fmt ./examples/minimal/ \
     && (cd examples/minimal/ && go build) \
     && ./examples/minimal/minimal DB_web.sendpreoffer_31101
@@ -35,7 +35,7 @@ import (
 	"time"
 
 	"github.com/davecgh/go-spew/spew"
-	oracall "github.com/tgulacsi/oracall/lib"
+	genocall "github.com/godror/gen-o-call/lib"
 	"golang.org/x/net/context"
 )
 
@@ -60,7 +60,7 @@ func main() {
 	rs := reflect.ValueOf(srv)
 	rf := rs.MethodByName(funName)
 	if !rf.IsValid() {
-		rf = rs.MethodByName(oracall.CamelCase(funName))
+		rf = rs.MethodByName(genocall.CamelCase(funName))
 	}
 	if !rf.IsValid() {
 		rt := rs.Type()
@@ -68,7 +68,7 @@ func main() {
 		for i := range methods {
 			methods[i] = rt.Method(i).Name
 		}
-		log.Fatalf("cannot find function named %q/%q, only %q", funName, oracall.CamelCase(funName), methods)
+		log.Fatalf("cannot find function named %q/%q, only %q", funName, genocall.CamelCase(funName), methods)
 	}
 	log.Printf("fun to be called is %s", rf)
 

@@ -39,9 +39,9 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/go-kit/kit/log"
+	custom "github.com/godror/gen-o-call/custom"
+	genocall "github.com/godror/gen-o-call/lib"
 	"github.com/tgulacsi/go/loghlp/kitloghlp"
-	custom "github.com/tgulacsi/oracall/custom"
-	oracall "github.com/tgulacsi/oracall/lib"
 	errors "golang.org/x/xerrors"
 
 	// for Oracle-specific drivers
@@ -57,7 +57,7 @@ var logger = kitloghlp.New(os.Stderr)
 var flagConnect = flag.String("connect", "", "connect to DB for retrieving function arguments")
 
 func main() {
-	oracall.Log = log.With(logger, "lib", "oracall").Log
+	genocall.Log = log.With(logger, "lib", "genocall").Log
 	if err := Main(os.Args); err != nil {
 		logger.Log("error", fmt.Sprintf("%+v", err))
 		os.Exit(1)
@@ -69,18 +69,18 @@ func Main(args []string) error {
 
 	gopSrc := filepath.Join(os.Getenv("GOPATH"), "src")
 
-	flag.BoolVar(&oracall.SkipMissingTableOf, "skip-missing-table-of", true, "skip functions with missing TableOf info")
+	flag.BoolVar(&genocall.SkipMissingTableOf, "skip-missing-table-of", true, "skip functions with missing TableOf info")
 	flagDump := flag.String("dump", "", "dump to this csv")
 	flagBaseDir := flag.String("base-dir", gopSrc, "base dir for the -pb-out, -db-out flags")
 	flagPbOut := flag.String("pb-out", "", "package import path for the Protocol Buffers files, optionally with the package name, like \"my/pb-pkg:main\"")
 	flagDbOut := flag.String("db-out", "-:main", "package name of the generated functions, optionally with the package name, like \"my/db-pkg:main\"")
 	flagGenerator := flag.String("protoc-gen", "gogofast", "use protoc-gen-<generator>")
-	flag.BoolVar(&oracall.NumberAsString, "number-as-string", false, "add ,string to json tags")
+	flag.BoolVar(&genocall.NumberAsString, "number-as-string", false, "add ,string to json tags")
 	flag.BoolVar(&custom.ZeroIsAlmostZero, "zero-is-almost-zero", false, "zero should be just almost zero, to distinguish 0 and non-set field")
 	flagVerbose := flag.Bool("v", false, "verbose logging")
 	flagExcept := flag.String("except", "", "except these functions")
 	flagReplace := flag.String("replace", "", "funcA=>funcB")
-	flag.IntVar(&oracall.MaxTableSize, "max-table-size", oracall.MaxTableSize, "maximum table size for PL/SQL associative arrays")
+	flag.IntVar(&genocall.MaxTableSize, "max-table-size", genocall.MaxTableSize, "maximum table size for PL/SQL associative arrays")
 
 	flag.Parse()
 	if *flagPbOut == "" {
@@ -99,12 +99,12 @@ func Main(args []string) error {
 	if pattern == "" {
 		pattern = "%"
 	}
-	oracall.Gogo = *flagGenerator != "go"
+	genocall.Gogo = *flagGenerator != "go"
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	var functions []oracall.Function
+	var functions []genocall.Function
 	var err error
 
 	filters := [](func(string) bool){func(string) bool { return true }}
@@ -129,7 +129,7 @@ func Main(args []string) error {
 		})
 	}
 
-	var annotations []oracall.Annotation
+	var annotations []genocall.Annotation
 	if *flagConnect == "" {
 		if pattern != "%" {
 			rPattern := regexp.MustCompile("(?i)" + strings.Replace(strings.Replace(pattern, ".", "[.]", -1), "%", ".*", -1))
@@ -137,7 +137,7 @@ func Main(args []string) error {
 				return rPattern.MatchString(s)
 			})
 		}
-		functions, err = oracall.ParseCsvFile("", filter)
+		functions, err = genocall.ParseCsvFile("", filter)
 	} else {
 		var cx *sql.DB
 		if cx, err = sql.Open("godror", *flagConnect); err != nil {
@@ -161,7 +161,7 @@ func Main(args []string) error {
 	out := os.Stdout
 	var testOut *os.File
 	if dbPath != "" && dbPath != "-" {
-		fn := "oracall.go"
+		fn := "genocall.go"
 		if dbPkg != "main" {
 			fn = dbPkg + ".go"
 		}
@@ -193,7 +193,7 @@ func Main(args []string) error {
 		if i < 0 {
 			continue
 		}
-		a := oracall.Annotation{Type: "replace", Name: elt[:i], Other: elt[i+2:]}
+		a := genocall.Annotation{Type: "replace", Name: elt[:i], Other: elt[i+2:]}
 		if i = strings.IndexByte(a.Name, '.'); i >= 0 {
 			a.Package, a.Name = a.Name[:i], a.Name[i+1:]
 			a.Other = strings.TrimPrefix(a.Other, a.Package)
@@ -201,7 +201,7 @@ func Main(args []string) error {
 		annotations = append(annotations, a)
 	}
 	Log("annotations", annotations)
-	functions = oracall.ApplyAnnotations(functions, annotations)
+	functions = genocall.ApplyAnnotations(functions, annotations)
 	sort.Slice(functions, func(i, j int) bool { return functions[i].Name() < functions[j].Name() })
 
 	var grp errgroup.Group
@@ -210,7 +210,7 @@ func Main(args []string) error {
 		if pbPath == dbPath {
 			pbPath = ""
 		}
-		if err := oracall.SaveFunctions(
+		if err := genocall.SaveFunctions(
 			out, functions,
 			dbPkg, pbPath, false,
 		); err != nil {
@@ -224,7 +224,7 @@ func Main(args []string) error {
 			if pbPath == dbPath {
 				pbPath = ""
 			}
-			if err := oracall.SaveFunctionTests(
+			if err := genocall.SaveFunctionTests(
 				testOut, functions,
 				dbPkg, pbPath, false,
 			); err != nil {
@@ -235,7 +235,7 @@ func Main(args []string) error {
 	}
 
 	grp.Go(func() error {
-		fn := "oracall.proto"
+		fn := "genocall.proto"
 		if pbPkg != "main" {
 			fn = pbPkg + ".proto"
 		}
@@ -246,7 +246,7 @@ func Main(args []string) error {
 		if err != nil {
 			return errors.Errorf("create proto: %w", err)
 		}
-		err = oracall.SaveProtobuf(fh, functions, pbPkg)
+		err = genocall.SaveProtobuf(fh, functions, pbPkg)
 		if closeErr := fh.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -297,7 +297,7 @@ func (t dbType) String() string {
 	return fmt.Sprintf("%s{%s}[%d](%s/%s.%s.%s@%s)", t.Argument, t.Data, t.Level, t.PLS, t.Owner, t.Name, t.Subname, t.Link)
 }
 
-func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter func(string) bool) (functions []oracall.Function, annotations []oracall.Annotation, err error) {
+func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter func(string) bool) (functions []genocall.Function, annotations []genocall.Annotation, err error) {
 	tbl, objTbl := "user_arguments", "user_objects"
 	if strings.HasPrefix(pattern, "DBMS_") || strings.HasPrefix(pattern, "UTL_") {
 		tbl, objTbl = "all_arguments", "all_objects"
@@ -530,7 +530,7 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 	var docsMu sync.Mutex
 	var replMu sync.Mutex
 	docs := make(map[string]string)
-	userArgs := make(chan oracall.UserArgument, 16)
+	userArgs := make(chan genocall.UserArgument, 16)
 	grp.Go(func() error {
 		defer close(userArgs)
 		var pkgTime time.Time
@@ -557,7 +557,7 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 				//logger.Log("arg", row.Argument, "name", row.Name, "sub", row.Subname, "data", row.Data, "pls", row.PLS)
 			}
 			//logger.Log("row", row)
-			var ua oracall.UserArgument
+			var ua genocall.UserArgument
 			ua.DataType = row.Data
 			ua.InOut = row.InOut.String
 			if cw != nil {
@@ -596,8 +596,8 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 					}
 					replMu.Lock()
 					for _, b := range rAnnotation.FindAll(buf.Bytes(), -1) {
-						b = bytes.TrimSpace(bytes.TrimPrefix(b, []byte("--oracall:")))
-						a := oracall.Annotation{Package: ua.PackageName}
+						b = bytes.TrimSpace(bytes.TrimPrefix(b, []byte("--genocall:")))
+						a := genocall.Annotation{Package: ua.PackageName}
 						if i := bytes.IndexByte(b, ' '); i < 0 {
 							continue
 						} else {
@@ -628,7 +628,7 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 					subCancel()
 					Log("msg", "parseDocs", "docs", len(funDocs), "error", docsErr)
 					docsMu.Lock()
-					pn := oracall.UnoCap(ua.PackageName) + "."
+					pn := genocall.UnoCap(ua.PackageName) + "."
 					for nm, doc := range funDocs {
 						docs[pn+strings.ToLower(nm)] = doc
 					}
@@ -683,9 +683,9 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 		}
 		return nil
 	})
-	filteredArgs := make(chan []oracall.UserArgument, 16)
-	grp.Go(func() error { oracall.FilterAndGroup(filteredArgs, userArgs, filter); return nil })
-	functions, err = oracall.ParseArguments(filteredArgs, filter)
+	filteredArgs := make(chan []genocall.UserArgument, 16)
+	grp.Go(func() error { genocall.FilterAndGroup(filteredArgs, userArgs, filter); return nil })
+	functions, err = genocall.ParseArguments(filteredArgs, filter)
 	if grpErr := grp.Wait(); grpErr != nil {
 		if err == nil {
 			err = grpErr
@@ -757,7 +757,7 @@ func parsePkgFlag(s string) (string, string) {
 }
 
 var rReplace = regexp.MustCompile(`\s*=>\s*`)
-var rAnnotation = regexp.MustCompile(`--oracall:(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
+var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
 func resolveType(ctx context.Context, collStmt, attrStmt *sql.Stmt, typ, owner, pkg, sub string) ([]dbType, error) {
 	plus := make([]dbType, 0, 4)
