@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
-	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
@@ -70,7 +69,6 @@ func Main(args []string) error {
 	gopSrc := filepath.Join(os.Getenv("GOPATH"), "src")
 
 	flag.BoolVar(&genocall.SkipMissingTableOf, "skip-missing-table-of", true, "skip functions with missing TableOf info")
-	flagDump := flag.String("dump", "", "dump to this csv")
 	flagBaseDir := flag.String("base-dir", gopSrc, "base dir for the -pb-out, -db-out flags")
 	flagPbOut := flag.String("pb-out", "", "package import path for the Protocol Buffers files, optionally with the package name, like \"my/pb-pkg:main\"")
 	flagDbOut := flag.String("db-out", "-:main", "package name of the generated functions, optionally with the package name, like \"my/db-pkg:main\"")
@@ -130,29 +128,21 @@ func Main(args []string) error {
 	}
 
 	var annotations []genocall.Annotation
-	if *flagConnect == "" {
-		if pattern != "%" {
-			rPattern := regexp.MustCompile("(?i)" + strings.Replace(strings.Replace(pattern, ".", "[.]", -1), "%", ".*", -1))
-			filters = append(filters, func(s string) bool {
-				return rPattern.MatchString(s)
-			})
-		}
-		functions, err = genocall.ParseCsvFile("", filter)
-	} else {
-		var cx *sql.DB
-		if cx, err = sql.Open("godror", *flagConnect); err != nil {
-			return errors.Errorf("connect to %s: %w", *flagConnect, err)
-		}
-		defer cx.Close()
-		if *flagVerbose {
-			godror.Log = log.With(logger, "lib", "godror").Log
-		}
-		if err = cx.Ping(); err != nil {
-			return errors.Errorf("Ping %s: %w", *flagConnect, err)
-		}
-
-		functions, annotations, err = parseDB(ctx, cx, pattern, *flagDump, filter)
+	db, err := sql.Open("godror", *flagConnect)
+	if err != nil {
+		return errors.Errorf("connect to %s: %w", *flagConnect, err)
 	}
+	defer db.Close()
+	if *flagVerbose {
+		godror.Log = log.With(logger, "lib", "godror").Log
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	functions, annotations, err = parseDB(ctx, tx, pattern, filter)
 	if err != nil {
 		return errors.Errorf("read %s: %w", flag.Arg(0), err)
 	}
@@ -276,14 +266,12 @@ func Main(args []string) error {
 }
 
 type dbRow struct {
-	Package, Object, InOut sql.NullString
-	OID, Seq               int
-	SubID                  sql.NullInt64
+	Owner, Package, Object, InOut string
 	dbType
 }
 
 func (r dbRow) String() string {
-	return fmt.Sprintf("%s.%s %s", r.Package.String, r.Object.String, r.dbType)
+	return fmt.Sprintf("%s.%s %s", r.Package, r.Object, r.dbType)
 }
 
 type dbType struct {
@@ -297,44 +285,18 @@ func (t dbType) String() string {
 	return fmt.Sprintf("%s{%s}[%d](%s/%s.%s.%s@%s)", t.Argument, t.Data, t.Level, t.PLS, t.Owner, t.Name, t.Subname, t.Link)
 }
 
-func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter func(string) bool) (functions []genocall.Function, annotations []genocall.Annotation, err error) {
-	tbl, objTbl := "user_arguments", "user_objects"
-	if strings.HasPrefix(pattern, "DBMS_") || strings.HasPrefix(pattern, "UTL_") {
-		tbl, objTbl = "all_arguments", "all_objects"
-	}
-	argumentsQry := `` + //nolint:gas
-		`SELECT A.*
-      FROM
-    (SELECT DISTINCT object_id object_id, subprogram_id, sequence*100 seq,
-           package_name, object_name,
-           data_level, argument_name, in_out,
-           data_type, data_precision, data_scale, character_set_name,
-           pls_type, char_length, type_owner, type_name, type_subname, type_link
-      FROM ` + tbl + `
-      WHERE data_type <> 'OBJECT' AND package_name||'.'||object_name LIKE UPPER(:1)
-     UNION ALL
-     SELECT DISTINCT object_id object_id, subprogram_id, A.sequence*100 + B.attr_no,
-            package_name, object_name,
-            A.data_level, B.attr_name, A.in_out,
-            B.ATTR_TYPE_NAME, B.PRECISION, B.scale, B.character_set_name,
-            NVL2(B.ATTR_TYPE_OWNER, B.attr_type_owner||'.', '')||B.attr_type_name, B.length,
-			NULL, NULL, NULL, NULL
-       FROM all_type_attrs B, ` + tbl + ` A
-       WHERE B.owner = A.type_owner AND B.type_name = A.type_name AND
-             A.data_type = 'OBJECT' AND
-             A.package_name||'.'||A.object_name LIKE UPPER(:2)
-     ) A
-      ORDER BY 1, 2, 3`
-
+func parseDB(ctx context.Context, db *sql.Tx, pattern string, filter func(string) bool) (functions []genocall.Function, annotations []genocall.Annotation, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	objTimeQry := `SELECT last_ddl_time FROM ` + objTbl + ` WHERE object_name = :1 AND object_type <> 'PACKAGE BODY'`
-	objTimeStmt, err := cx.PrepareContext(ctx, objTimeQry)
+	const objTimeQry = `SELECT last_ddl_time FROM all_objects WHERE object_name = :1 AND object_type <> 'PACKAGE BODY'`
+
+	objTimeStmt, err := db.PrepareContext(ctx, objTimeQry)
 	if err != nil {
 		return nil, nil, errors.Errorf("%s: %w", objTimeQry, err)
 	}
 	defer objTimeStmt.Close()
+
 	getObjTime := func(name string) (time.Time, error) {
 		var t time.Time
 		if err := objTimeStmt.QueryRowContext(ctx, name).Scan(&t); err != nil {
@@ -343,209 +305,51 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 		return t, nil
 	}
 
-	dbCh := make(chan dbRow)
-	grp, grpCtx := errgroup.WithContext(ctx)
-	grp.Go(func() error {
-		defer close(dbCh)
-		var collStmt, attrStmt *sql.Stmt
-		qry := `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
-				   length, precision, scale, character_set_name, index_by,
-				   (SELECT MIN(typecode) FROM all_plsql_types B
-				      WHERE B.owner = A.elem_type_owner AND
-					        B.type_name = A.elem_type_name AND
-							B.package_name = A.elem_type_package) typecode
-			  FROM all_plsql_coll_types A
-			  WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
-			UNION
-			SELECT coll_type, elem_type_owner, elem_type_name, NULL elem_type_package,
-				   length, precision, scale, character_set_name, NULL index_by,
-				   (SELECT MIN(typecode) FROM all_types B
-				      WHERE B.owner = A.elem_type_owner AND
-					        B.type_name = A.elem_type_name) typecode
-			  FROM all_coll_types A
-			  WHERE (owner, type_name) IN (
-			    SELECT :owner, :pkg FROM DUAL
-				UNION
-				SELECT table_owner, table_name||NVL2(db_link, '@'||db_link, NULL)
-				  FROM user_synonyms
-				  WHERE synonym_name = :pkg)`
-		var resolveTypeShort func(ctx context.Context, typ, owner, name, sub string) ([]dbType, error)
-		var err error
-		if collStmt, err = cx.PrepareContext(grpCtx, qry); err != nil {
-			logger.Log("WARN", errors.Errorf("%s: %w", qry, err))
-		} else {
-			defer collStmt.Close()
-			if rows, err := collStmt.QueryContext(grpCtx, sql.Named("owner", ""), sql.Named("pkg", ""), sql.Named("sub", "")); err != nil {
-				collStmt = nil
-			} else {
-				rows.Close()
-
-				qry = `SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
-                      length, precision, scale, character_set_name, attr_no,
-				      (SELECT MIN(typecode) FROM all_plsql_types B
-				         WHERE B.owner = A.attr_type_owner AND B.type_name = A.attr_type_name AND B.package_name = A.attr_type_package) typecode
-			     FROM all_plsql_type_attrs A
-				 WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
-				 ORDER BY attr_no`
-				if attrStmt, err = cx.PrepareContext(grpCtx, qry); err != nil {
-					logger.Log("WARN", errors.Errorf("%s: %w", qry, err))
-				} else {
-					defer attrStmt.Close()
-					if rows, err := attrStmt.QueryContext(grpCtx, sql.Named("owner", ""), sql.Named("pkg", ""), sql.Named("sub", "")); err != nil {
-						attrStmt = nil
-					} else {
-						rows.Close()
-						resolveTypeShort = func(ctx context.Context, typ, owner, name, sub string) ([]dbType, error) {
-							return resolveType(ctx, collStmt, attrStmt, typ, owner, name, sub)
-						}
-					}
-				}
-			}
-		}
-
-		qry = argumentsQry
-		rows, err := cx.QueryContext(grpCtx, qry, pattern, pattern)
-		if err != nil {
-			logger.Log("qry", qry, "error", err)
-			return errors.Errorf("%s: %w", qry, err)
-		}
-		defer rows.Close()
-
-		var seq int
-		for rows.Next() {
-			var row dbRow
-			if err = rows.Scan(&row.OID, &row.SubID, &row.Seq, &row.Package, &row.Object,
-				&row.Level, &row.Argument, &row.InOut,
-				&row.Data, &row.Prec, &row.Scale, &row.Charset,
-				&row.PLS, &row.Length, &row.Owner, &row.Name, &row.Subname, &row.Link,
-			); err != nil {
-				return errors.Errorf("reading row=%v: %w", rows, err)
-			}
-			row.Seq = seq
-			seq++
-			select {
-			case <-grpCtx.Done():
-				return grpCtx.Err()
-			case dbCh <- row:
-			}
-			if resolveTypeShort == nil {
-				continue
-			}
-			if row.Data == "PL/SQL TABLE" || row.Data == "PL/SQL RECORD" || row.Data == "REF CURSOR" || row.Data == "TABLE" {
-				plus, err := resolveTypeShort(grpCtx, row.Data, row.Owner, row.Name, row.Subname)
-				if err != nil {
-					return err
-				}
-				if plus, err = expandArgs(grpCtx, plus, resolveTypeShort); err != nil {
-					return err
-				}
-				for _, p := range plus {
-					row.Seq = seq
-					seq++
-					row.Argument, row.Data, row.Length, row.Prec, row.Scale, row.Charset = p.Argument, p.Data, p.Length, p.Prec, p.Scale, p.Charset
-					row.Owner, row.Name, row.Subname, row.Link = p.Owner, p.Name, p.Subname, p.Link
-					row.Level = p.Level
-					//logger.Log("arg", row.Argument, "row", row.Length, "p", p.Length)
-					select {
-					case <-grpCtx.Done():
-						return grpCtx.Err()
-					case dbCh <- row:
-					}
-				}
-			}
-
-		}
-		if err != nil {
-			return errors.Errorf("walking rows: %w", err)
-		}
-		return nil
-	})
-
-	var cwMu sync.Mutex
-	var cw *csv.Writer
-	if dumpFn != "" {
-		var lastOk bool
-		qry := argumentsQry
-		qry = qry[:strings.Index(qry, "FROM "+tbl)] //nolint:gas
-		qry = strings.TrimPrefix(qry[strings.LastIndex(qry, "SELECT ")+7:], "DISTINCT ")
-		colNames := strings.Split(
-			strings.Map(
-				func(r rune) rune {
-					if 'A' <= r && r <= 'Z' || '0' <= r && r <= '9' || r == '_' {
-						lastOk = true
-						return r
-					}
-					if 'a' <= r && r <= 'z' {
-						lastOk = true
-						return unicode.ToUpper(r)
-					}
-					if r == ',' {
-						return r
-					}
-					if lastOk {
-						lastOk = false
-						return ' '
-					}
-					return -1
-				},
-				qry,
-			),
-			",",
-		)
-		for i, nm := range colNames {
-			nm = strings.TrimSpace(nm)
-			colNames[i] = nm
-			if j := strings.LastIndexByte(nm, ' '); j >= 0 {
-				colNames[i] = nm[j+1:]
-			}
-		}
-		var fh *os.File
-		if fh, err = os.Create(dumpFn); err != nil {
-			logger.Log("msg", "create", "dump", dumpFn, "error", err)
-			return functions, annotations, errors.Errorf("%s: %w", dumpFn, err)
-		}
-		defer func() {
-			cwMu.Lock()
-			cw.Flush()
-			err = errors.Errorf("csv flush: %w", cw.Error())
-			cwMu.Unlock()
-			if err != nil {
-				logger.Log("msg", "flush", "csv", fh.Name(), "error", err)
-			}
-			if err = fh.Close(); err != nil {
-				logger.Log("msg", "close", "dump", fh.Name(), "error", err)
-			}
-		}()
-		cwMu.Lock()
-		cw = csv.NewWriter(fh)
-		err = cw.Write(colNames)
-		cwMu.Unlock()
-		if err != nil {
-			logger.Log("msg", "write header to csv", "error", err)
-			return functions, annotations, errors.Errorf("write header: %w", err)
-		}
+	tr, err := newTypeResolver(ctx, db)
+	if err != nil {
+		return nil, nil, err
 	}
+	defer tr.Close()
 
-	var prevPackage string
-	var docsMu sync.Mutex
-	var replMu sync.Mutex
+	const argumentsQry = `SELECT owner, package_name, object_name,
+           argument_name, in_out,
+           data_type, data_precision, data_scale, character_set_name,
+           pls_type, char_length, type_owner, type_name, type_subname, type_link
+      FROM all_arguments
+      WHERE package_name||'.'||object_name LIKE UPPER(:pat)
+      ORDER BY 1, 2, 3, sequence`
+	rows, err := db.QueryContext(ctx, argumentsQry, sql.Named("pat", pattern))
+	if err != nil {
+		logger.Log("qry", argumentsQry, "error", err)
+		return nil, nil, errors.Errorf("%s: %w", argumentsQry, err)
+	}
+	defer rows.Close()
+
 	docs := make(map[string]string)
 	userArgs := make(chan genocall.UserArgument, 16)
-	grp.Go(func() error {
-		defer close(userArgs)
-		var pkgTime time.Time
-		ctx := grpCtx
-	Loop:
-		for {
-			var row dbRow
-			var ok bool
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case row, ok = <-dbCh:
-				if !ok {
-					break Loop
-				}
+	for rows.Next() {
+		var row dbRow
+		if err = rows.Scan(&row.Owner, &row.Package, &row.Object,
+			&row.Level, &row.Argument, &row.InOut,
+			&row.Data, &row.Prec, &row.Scale, &row.Charset,
+			&row.PLS, &row.Length, &row.Owner, &row.Name, &row.Subname, &row.Link,
+		); err != nil {
+			return nil, nil, errors.Errorf("reading row=%v: %w", rows, err)
+		}
+		if row.Data == "OBJECT" || row.Data == "PL/SQL TABLE" || row.Data == "PL/SQL RECORD" || row.Data == "REF CURSOR" || row.Data == "TABLE" {
+			plus, err := tr.Resolve(ctx, row.Data, row.Owner, row.Name, row.Subname)
+			if err != nil {
+				return nil, nil, err
+			}
+			if plus, err = tr.ExpandArgs(ctx, plus); err != nil {
+				return nil, nil, err
+			}
+			for _, p := range plus {
+				row.Argument, row.Data, row.Length, row.Prec, row.Scale, row.Charset = p.Argument, p.Data, p.Length, p.Prec, p.Scale, p.Charset
+				row.Owner, row.Name, row.Subname, row.Link = p.Owner, p.Name, p.Subname, p.Link
+				row.Level = p.Level
+				//logger.Log("arg", row.Argument, "row", row.Length, "p", p.Length)
+			}
 				if row.Name == "" {
 					row.PLS = row.Data
 				} else {
@@ -554,27 +358,22 @@ func parseDB(ctx context.Context, cx *sql.DB, pattern, dumpFn string, filter fun
 						row.PLS += "@" + row.Link
 					}
 				}
+		}
+
+	}
+	if err != nil {
+		return nil, nil, errors.Errorf("walking rows: %w", err)
+	}
+
+	var prevPackage string
+	var docsMu sync.Mutex
+	var replMu sync.Mutex
 				//logger.Log("arg", row.Argument, "name", row.Name, "sub", row.Subname, "data", row.Data, "pls", row.PLS)
 			}
 			//logger.Log("row", row)
 			var ua genocall.UserArgument
 			ua.DataType = row.Data
 			ua.InOut = row.InOut.String
-			if cw != nil {
-				N := i64ToString
-				cwMu.Lock()
-				err := cw.Write([]string{
-					strconv.Itoa(row.OID), N(row.SubID), strconv.Itoa(row.Seq), row.Package.String, row.Object.String,
-					strconv.Itoa(row.Level), row.Argument, ua.InOut,
-					ua.DataType, N(row.Prec), N(row.Scale), row.Charset,
-					row.PLS, N(row.Length),
-					row.Owner, row.Name, row.Subname, row.Link,
-				})
-				cwMu.Unlock()
-				if err != nil {
-					return errors.Errorf("write csv: %w", err)
-				}
-			}
 			if !row.Package.Valid {
 				continue
 			}
@@ -759,7 +558,68 @@ func parsePkgFlag(s string) (string, string) {
 var rReplace = regexp.MustCompile(`\s*=>\s*`)
 var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
-func resolveType(ctx context.Context, collStmt, attrStmt *sql.Stmt, typ, owner, pkg, sub string) ([]dbType, error) {
+type typeResolver map[string]*sql.Stmt
+
+func newTypeResolver(ctx context.Context, tx *sql.Tx) (typeResolver, error) {
+	stmts := make(typeResolver, 4)
+	for nm, qry := range map[string]string{
+		"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
+			   length, precision, scale, character_set_name, index_by,
+			   (SELECT MIN(typecode) FROM all_plsql_types B
+				  WHERE B.owner = A.elem_type_owner AND
+						B.type_name = A.elem_type_name AND
+						B.package_name = A.elem_type_package) typecode
+		  FROM all_plsql_coll_types A
+		  WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
+		UNION
+		SELECT coll_type, elem_type_owner, elem_type_name, NULL elem_type_package,
+			   length, precision, scale, character_set_name, NULL index_by,
+			   (SELECT MIN(typecode) FROM all_types B
+				  WHERE B.owner = A.elem_type_owner AND
+						B.type_name = A.elem_type_name) typecode
+		  FROM all_coll_types A
+		  WHERE (owner, type_name) IN (
+			SELECT :owner, :pkg FROM DUAL
+			UNION
+			SELECT table_owner, table_name||NVL2(db_link, '@'||db_link, NULL)
+			  FROM user_synonyms
+			  WHERE synonym_name = :pkg)`,
+
+		"plsTyp": `SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
+		  length, precision, scale, character_set_name, attr_no,
+		  (SELECT MIN(typecode) FROM all_plsql_types B
+			 WHERE B.owner = A.attr_type_owner AND B.type_name = A.attr_type_name AND B.package_name = A.attr_type_package) typecode
+	 FROM all_plsql_type_attrs A
+	 WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
+	 ORDER BY attr_no`,
+
+		"objTyp": `SELECT B.attr_name, B.ATTR_TYPE_NAME, B.PRECISION, B.scale, B.character_set_name,
+            NVL2(B.ATTR_TYPE_OWNER, B.attr_type_owner||'.', '')||B.attr_type_name, B.length
+       FROM all_type_attrs B
+	   WHERE B.owner = :owner AND B.type_name = :sub`,
+	} {
+		var err error
+		if stmts[nm], err = tx.PrepareContext(ctx, qry); err != nil {
+			stmts.Close()
+			return nil, errors.Errorf("%s: %w", qry, err)
+		}
+	}
+	return stmts, nil
+}
+
+func (tr typeResolver) Close() error {
+	var firstErr error
+	for _, stmt := range tr {
+		if stmt != nil {
+			if err := stmt.Close(); err != nil && firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
+	return firstErr
+}
+
+func (tr typeResolver) Resolve(ctx context.Context, typ, owner, pkg, sub string) ([]dbType, error) {
 	plus := make([]dbType, 0, 4)
 	var rows *sql.Rows
 	var err error
@@ -770,7 +630,7 @@ func resolveType(ctx context.Context, collStmt, attrStmt *sql.Stmt, typ, owner, 
 			   length, precision, scale, character_set_name, index_by
 		  FROM all_plsql_coll_types
 		  WHERE owner = :1 AND package_name = :2 AND type_name = :3*/
-		if rows, err = collStmt.QueryContext(ctx,
+		if rows, err = tr["coll"].QueryContext(ctx,
 			sql.Named("owner", owner), sql.Named("pkg", pkg), sql.Named("sub", sub),
 		); err != nil {
 			return plus, err
@@ -819,7 +679,7 @@ func resolveType(ctx context.Context, collStmt, attrStmt *sql.Stmt, typ, owner, 
 					     FROM all_plsql_type_attrs
 						 WHERE owner = :1 AND package_name = :2 AND type_name = :3
 						 ORDER BY attr_no*/
-		if rows, err = attrStmt.QueryContext(ctx,
+		if rows, err = tr["plsTyp"].QueryContext(ctx,
 			sql.Named("owner", owner), sql.Named("pkg", pkg), sql.Named("sub", sub),
 		); err != nil {
 			return plus, err
@@ -890,7 +750,7 @@ UNIT_DB       	19	4	NUMBER
 UNIT_ARF     	20	4	NUMBER
 */
 
-func expandArgs(ctx context.Context, plus []dbType, resolveTypeShort func(ctx context.Context, typ, owner, name, sub string) ([]dbType, error)) ([]dbType, error) {
+func (tr typeResolver) ExpandArgs(ctx context.Context, plus []dbType) ([]dbType, error) {
 	//logger.Log("expand", plus)
 	for i := 0; i < len(plus); i++ {
 		p := plus[i]
@@ -899,7 +759,7 @@ func expandArgs(ctx context.Context, plus []dbType, resolveTypeShort func(ctx co
 		}
 		//logger.Log("i", i, "arg", p.Argument, "data", p.Data, "owner", p.Owner, "name", p.Name, "sub", p.Subname)
 		if p.Data == "TABLE" || p.Data == "PL/SQL TABLE" || p.Data == "PL/SQL RECORD" || p.Data == "REF CURSOR" {
-			q, err := resolveTypeShort(ctx, p.Data, p.Owner, p.Name, p.Subname)
+			q, err := tr.Resolve(ctx, p.Data, p.Owner, p.Name, p.Subname)
 			if err != nil {
 				return plus, errors.Errorf("%+v: %w", p, err)
 			}
