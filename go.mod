@@ -15,6 +15,7 @@ require (
 	github.com/kylelemons/godebug v1.1.0
 	github.com/oklog/ulid v1.3.1
 	github.com/tgulacsi/go v0.8.0
+	github.com/tgulacsi/oracall v0.13.1 // indirect
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
 	golang.org/x/sys v0.0.0-20190904154756-749cb33beabd // indirect
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543

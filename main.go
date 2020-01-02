@@ -17,21 +17,17 @@ limitations under the License.
 package main
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"flag"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 	"unicode"
 
@@ -263,6 +259,19 @@ func Main(args []string) error {
 		return err
 	}
 	return nil
+}
+
+var rReplace = regexp.MustCompile(`\s*=>\s*`)
+
+func parsePkgFlag(s string) (string, string) {
+	if i := strings.LastIndexByte(s, ':'); i >= 0 {
+		return s[:i], s[i+1:]
+	}
+	pkg := path.Base(s)
+	if pkg == "" {
+		pkg = "main"
+	}
+	return s, pkg
 }
 
 // vim: set fileencoding=utf-8 noet:

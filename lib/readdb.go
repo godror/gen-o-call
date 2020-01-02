@@ -452,6 +452,6 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 
 type querier interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
-	QueryRowContext(context.Context, string, ...interface{}) (*sql.Row, error)
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 	PrepareContext(context.Context, string) (*sql.Stmt, error)
 }

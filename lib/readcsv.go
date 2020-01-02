@@ -187,8 +187,8 @@ func ReadCsv(r io.Reader) (userArgs []UserArgument, err error) {
 			PackageName: rec[csvFields["PACKAGE_NAME"]],
 			ObjectName:  rec[csvFields["OBJECT_NAME"]],
 
-			DataLevel:    mustBeUint8(rec[csvFields["DATA_LEVEL"]]),
-			Position:     mustBeUint(rec[csvFields["SEQUENCE"]]),
+			DataLevel: mustBeUint8(rec[csvFields["DATA_LEVEL"]]),
+			//Position:     mustBeUint(rec[csvFields["SEQUENCE"]]),
 			ArgumentName: rec[csvFields["ARGUMENT_NAME"]],
 			InOut:        rec[csvFields["IN_OUT"]],
 

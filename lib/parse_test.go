@@ -370,7 +370,7 @@ END DB_web_dbx;`,
 		},
 	} {
 
-		docs, err := parseDocs(ctx, tc.Source)
+		docs, err := ParseDocs(ctx, tc.Source)
 		if err != nil {
 			t.Errorf("%q. %v", tcName, err)
 			continue
