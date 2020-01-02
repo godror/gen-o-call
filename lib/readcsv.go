@@ -271,6 +271,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool) (functi
 			parent := lastArgs[level-1]
 			if parent == nil {
 				Log("level", level, "lastArgs", lastArgs, "fun", fun)
+				panic("parent of " + fun.Name() + " is nil")
 			}
 			if parent.Flavor == FLAVOR_TABLE {
 				parent.TableOf = &arg

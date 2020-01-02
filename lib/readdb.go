@@ -11,7 +11,6 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
-	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -284,25 +283,7 @@ func getSource(ctx context.Context, w io.Writer, cx querier, packageName string)
 	return nil
 }
 
-func i64ToString(n sql.NullInt64) string {
-	if n.Valid {
-		return strconv.FormatInt(n.Int64, 10)
-	}
-	return ""
-}
-
-func parsePkgFlag(s string) (string, string) {
-	if i := strings.LastIndexByte(s, ':'); i >= 0 {
-		return s[:i], s[i+1:]
-	}
-	pkg := path.Base(s)
-	if pkg == "" {
-		pkg = "main"
-	}
-	return s, pkg
-}
-
-var rReplace = regexp.MustCompile(`\s*=>\s*`)
+//var rReplace = regexp.MustCompile(`\s*=>\s*`)
 var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
 type Type struct {
@@ -459,7 +440,7 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 		err = tr.Resolve(ctx, "PL/SQL RECORD", tn)
 
 	default:
-		return errors.Errorf("%s: %w", typ, errors.New("unknown type"))
+		return errors.Errorf("%v: %w", typ, errors.New("unknown type"))
 	}
 	if rows != nil {
 		if rowsErr := rows.Err(); rowsErr != nil && err == nil {
