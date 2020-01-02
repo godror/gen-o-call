@@ -18,7 +18,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/errgroup"
 	errors "golang.org/x/xerrors"
 )
 
@@ -73,27 +72,25 @@ func ParseCsvFile(filename string, filter func(string) bool) (functions []Functi
 
 // ParseCsv parses the csv
 func ParseCsv(r io.Reader, filter func(string) bool) (functions []Function, err error) {
-	userArgs := make(chan UserArgument, 16)
-	var grp errgroup.Group
-	grp.Go(func() error { return ReadCsv(userArgs, r) })
-	filteredArgs := make(chan []UserArgument, 16)
-	grp.Go(func() error { FilterAndGroup(filteredArgs, userArgs, filter); return nil })
-	functions, err = ParseArguments(filteredArgs, filter)
-	if err == nil {
-		err = grp.Wait()
+	userArgs, err := ReadCsv(r)
+	if err != nil {
+		return nil, err
 	}
-	return functions, err
+	filteredArgs, err := FilterAndGroup(userArgs, filter)
+	if err != nil {
+		return nil, err
+	}
+	return ParseArguments(filteredArgs, filter)
 }
 
-func FilterAndGroup(filteredArgs chan<- []UserArgument, userArgs <-chan UserArgument, filter func(string) bool) {
-	defer close(filteredArgs)
+func FilterAndGroup(userArgs []UserArgument, filter func(string) bool) (filteredArgs [][]UserArgument, err error) {
 	type program struct {
 		ObjectID, SubprogramID  uint
 		PackageName, ObjectName string
 	}
 	var lastProg, zeroProg program
 	args := make([]UserArgument, 0, 4)
-	for ua := range userArgs {
+	for _, ua := range userArgs {
 		if filter != nil && !filter(ua.PackageName+"."+ua.ObjectName) {
 			continue
 		}
@@ -102,7 +99,7 @@ func FilterAndGroup(filteredArgs chan<- []UserArgument, userArgs <-chan UserArgu
 			PackageName: ua.PackageName, ObjectName: ua.ObjectName}
 		if lastProg != zeroProg && lastProg != actProg {
 			if len(args) != 0 {
-				filteredArgs <- args
+				filteredArgs = append(filteredArgs, args)
 				args = make([]UserArgument, 0, cap(args))
 			}
 		}
@@ -110,8 +107,9 @@ func FilterAndGroup(filteredArgs chan<- []UserArgument, userArgs <-chan UserArgu
 		lastProg = actProg
 	}
 	if len(args) != 0 {
-		filteredArgs <- args
+		filteredArgs = append(filteredArgs, args)
 	}
+	return filteredArgs, nil
 }
 
 // OpenCsv opens the filename
@@ -137,16 +135,12 @@ func MustOpenCsv(filename string) *os.File {
 }
 
 // ReadCsv reads the csv from the Reader, and sends the arguments to the given channel.
-func ReadCsv(userArgs chan<- UserArgument, r io.Reader) error {
-	defer close(userArgs)
-
-	var err error
-
+func ReadCsv(r io.Reader) (userArgs []UserArgument, err error) {
 	br := bufio.NewReader(r)
 	csvr := csv.NewReader(br)
 	b, err := br.Peek(100)
 	if err != nil {
-		return fmt.Errorf("error peeking into file: %s", err)
+		return userArgs, fmt.Errorf("error peeking into file: %s", err)
 	}
 	if bytes.IndexByte(b, ';') >= 0 {
 		csvr.Comma = ';'
@@ -166,7 +160,7 @@ func ReadCsv(userArgs chan<- UserArgument, r io.Reader) error {
 	}
 	// get head
 	if rec, err = csvr.Read(); err != nil {
-		return fmt.Errorf("cannot read head: %s", err)
+		return userArgs, fmt.Errorf("cannot read head: %s", err)
 	}
 	csvr.FieldsPerRecord = len(rec)
 	for i, h := range rec {
@@ -212,12 +206,12 @@ func ReadCsv(userArgs chan<- UserArgument, r io.Reader) error {
 			TypeSubname: rec[csvFields["TYPE_SUBNAME"]],
 		}
 
-		userArgs <- arg
+		userArgs = append(userArgs, arg)
 	}
-	return err
+	return userArgs, err
 }
 
-func ParseArguments(userArgs <-chan []UserArgument, filter func(string) bool) (functions []Function, err error) {
+func ParseArguments(userArgs [][]UserArgument, filter func(string) bool) (functions []Function, err error) {
 	// Split args by functions
 	var dumpBuf strings.Builder
 	dumpEnc := xml.NewEncoder(&dumpBuf)
@@ -232,7 +226,7 @@ func ParseArguments(userArgs <-chan []UserArgument, filter func(string) bool) (f
 	_ = dumpXML
 	names := make([]string, 0, len(userArgs)/4)
 	var row int
-	for uas := range userArgs {
+	for _, uas := range userArgs {
 		if ua := uas[0]; ua.ObjectName[len(ua.ObjectName)-1] == '#' || //hidden
 			filter != nil && !filter(ua.ObjectName) {
 			continue

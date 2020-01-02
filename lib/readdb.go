@@ -13,7 +13,6 @@ import (
 	"io"
 	"path"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -34,12 +33,11 @@ func (r dbRow) String() string {
 type dbType struct {
 	Argument                                       string
 	Data, PLS, Owner, Name, Subname, Link, Charset string
-	Level                                          int
 	Prec, Scale, Length                            sql.NullInt64
 }
 
 func (t dbType) String() string {
-	return fmt.Sprintf("%s{%s}[%d](%s/%s.%s.%s@%s)", t.Argument, t.Data, t.Level, t.PLS, t.Owner, t.Name, t.Subname, t.Link)
+	return fmt.Sprintf("%s{%s}(%s/%s.%s.%s@%s)", t.Argument, t.Data, t.PLS, t.Owner, t.Name, t.Subname, t.Link)
 }
 
 func ReadDB(ctx context.Context, db querier, pattern string, filter func(string) bool) (functions []Function, annotations []Annotation, err error) {
@@ -82,8 +80,6 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 	defer rows.Close()
 
 	grp, grpCtx := errgroup.WithContext(ctx)
-	docsPromises := make(map[string]<-chan string)
-	typePromises := make(map[string]<-chan Type)
 	var annotPromises []<-chan []Annotation
 	var docPromises []<-chan map[string]string
 	userArgs := make([]UserArgument, 0, 1024)
@@ -92,7 +88,7 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 	for rows.Next() {
 		var row dbRow
 		if err = rows.Scan(&row.Owner, &row.Package, &row.Object,
-			&row.Level, &row.Argument, &row.InOut,
+			&row.Argument, &row.InOut,
 			&row.Data, &row.Prec, &row.Scale, &row.Charset,
 			&row.PLS, &row.Length, &row.Owner, &row.Name, &row.Subname, &row.Link,
 		); err != nil {
@@ -107,20 +103,9 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 
 		switch row.Data {
 		case "OBJECT", "PL/SQL TABLE", "PL/SQL RECORD", "REF CURSOR", "TABLE":
-			k := row.Data + "," + row.Owner + "," + row.Name + "," + row.Subname
-			if _, ok := typePromises[k]; !ok {
-				ch := make(chan Type, 1)
-				typePromises[k] = ch
-				grp.Go(func() error {
-					defer close(ch)
-					typ, err := tr.Resolve(grpCtx, row.Data, row.Owner, row.Name, row.Subname)
-					if err != nil {
-						return err
-					}
-					ch <- typ
-					return nil
-				})
-			}
+			grp.Go(func() error {
+				return tr.Resolve(grpCtx, row.Data, TypeName{Owner: row.Owner, Package: row.Name, Name: row.Subname})
+			})
 		}
 
 		ua.PackageName = row.Package
@@ -201,26 +186,37 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 
 		userArgs = append(userArgs, ua)
 	}
-	filteredArgs := make(chan []UserArgument, 16)
-	grp.Go(func() error { FilterAndGroup(filteredArgs, userArgs, filter); return nil })
-	functions, err = ParseArguments(filteredArgs, filter)
 	if grpErr := grp.Wait(); grpErr != nil {
 		if err == nil {
 			err = grpErr
 		}
 	}
-	docNames := make([]string, 0, len(docs))
-	for k := range docs {
-		docNames = append(docNames, k)
+	for _, aCh := range annotPromises {
+		select {
+		case <-ctx.Done():
+			return functions, annotations, ctx.Err()
+		case annot := <-aCh:
+			annotations = append(annotations, annot...)
+		}
 	}
-	sort.Strings(docNames)
-	var any bool
+	filteredArgs, err := FilterAndGroup(userArgs, filter)
+	if err != nil {
+		return functions, annotations, err
+	}
+	if functions, err = ParseArguments(filteredArgs, filter); err != nil {
+		return functions, annotations, err
+	}
+	funcs := make(map[string]int, len(functions))
 	for i, f := range functions {
-		if f.Documentation == "" {
-			if f.Documentation = docs[f.Name()]; f.Documentation == "" {
-				any = true
-			} else {
-				functions[i] = f
+		funcs[f.Name()] = i
+	}
+	for _, dCh := range docPromises {
+		select {
+		case <-ctx.Done():
+			return functions, annotations, ctx.Err()
+		case doc := <-dCh:
+			for k, s := range doc {
+				functions[funcs[k]].Documentation = s
 			}
 		}
 	}
@@ -244,6 +240,7 @@ func ParseAnnotationsAndDocs(ctx context.Context, packageName, src string) ([]An
 				a.Name = strings.TrimSpace(b)
 			} else {
 				a.Name = strings.TrimSpace(b[:i])
+				var err error
 				if a.Size, err = strconv.Atoi(strings.TrimSpace(b[i+1:])); err != nil {
 					return annotations, docs, err
 				}
@@ -308,10 +305,25 @@ func parsePkgFlag(s string) (string, string) {
 var rReplace = regexp.MustCompile(`\s*=>\s*`)
 var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
-type typeResolver map[string]*sql.Stmt
+type Type struct {
+	TypeName
+	Attr                       string
+	Charset, IndexBy, TypeCode string
+	Length, Prec, Scale        sql.NullInt64
+	CollectionOf               TypeName
+	RecordOf                   []TypeName
+}
 
-func newTypeResolver(ctx context.Context, tx querier) (typeResolver, error) {
-	stmts := make(typeResolver, 4)
+type TypeName struct {
+	Owner, Package, Name string
+}
+type typeResolver struct {
+	types map[TypeName]Type
+	stmts map[string]*sql.Stmt
+}
+
+func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
+	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]Type)}
 	for nm, qry := range map[string]string{
 		"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
 			   length, precision, scale, character_set_name, index_by,
@@ -336,7 +348,7 @@ func newTypeResolver(ctx context.Context, tx querier) (typeResolver, error) {
 			  WHERE synonym_name = :pkg)`,
 
 		"plsTyp": `SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
-		  length, precision, scale, character_set_name, attr_no,
+		  length, precision, scale, character_set_name,
 		  (SELECT MIN(typecode) FROM all_plsql_types B
 			 WHERE B.owner = A.attr_type_owner AND B.type_name = A.attr_type_name AND B.package_name = A.attr_type_package) typecode
 	 FROM all_plsql_type_attrs A
@@ -349,17 +361,19 @@ func newTypeResolver(ctx context.Context, tx querier) (typeResolver, error) {
 	   WHERE B.owner = :owner AND B.type_name = :sub`,
 	} {
 		var err error
-		if stmts[nm], err = tx.PrepareContext(ctx, qry); err != nil {
-			stmts.Close()
+		if tr.stmts[nm], err = tx.PrepareContext(ctx, qry); err != nil {
+			tr.Close()
 			return nil, errors.Errorf("%s: %w", qry, err)
 		}
 	}
-	return stmts, nil
+	return &tr, nil
 }
 
-func (tr typeResolver) Close() error {
+func (tr *typeResolver) Close() error {
 	var firstErr error
-	for _, stmt := range tr {
+	stmts := tr.stmts
+	tr.stmts = nil
+	for _, stmt := range stmts {
 		if stmt != nil {
 			if err := stmt.Close(); err != nil && firstErr == nil {
 				firstErr = err
@@ -369,102 +383,90 @@ func (tr typeResolver) Close() error {
 	return firstErr
 }
 
-func (tr typeResolver) Resolve(ctx context.Context, data, owner, pkg, sub string) (typ Type, err error) {
+func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) error {
+	typ := Type{TypeName: tn, TypeCode: data}
 	var rows *sql.Rows
-
+	var err error
 	switch data {
 	case "PL/SQL TABLE", "PL/SQL INDEX TABLE", "TABLE":
-		/*SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
-			   length, precision, scale, character_set_name, index_by
-		  FROM all_plsql_coll_types
-		  WHERE owner = :1 AND package_name = :2 AND type_name = :3*/
-		if rows, err = tr["coll"].QueryContext(ctx,
-			sql.Named("owner", owner), sql.Named("pkg", pkg), sql.Named("sub", sub),
+		var elem Type
+		if err = tr.stmts["coll"].QueryRowContext(ctx,
+			sql.Named("owner", tn.Owner), sql.Named("pkg", tn.Package), sql.Named("sub", tn.Name),
+		).Scan(
+			/*
+				"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
+					   length, precision, scale, character_set_name, index_by,
+					   (SELECT MIN(typecode) FROM all_plsql_types B
+						  WHERE B.owner = A.elem_type_owner AND
+								B.type_name = A.elem_type_name AND
+								B.package_name = A.elem_type_package) typecode
+				  FROM all_plsql_coll_types A
+				  WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
+				UNION
+				SELECT coll_type, elem_type_owner, elem_type_name, NULL elem_type_package,
+					   length, precision, scale, character_set_name, NULL index_by,
+					   (SELECT MIN(typecode) FROM all_types B
+						  WHERE B.owner = A.elem_type_owner AND
+								B.type_name = A.elem_type_name) typecode
+				  FROM all_coll_types A
+				  WHERE (owner, type_name) IN (
+					SELECT :owner, :pkg FROM DUAL
+					UNION
+					SELECT table_owner, table_name||NVL2(db_link, '@'||db_link, NULL)
+					  FROM user_synonyms
+					  WHERE synonym_name = :pkg)`,
+			*/
+			&typ.TypeCode,
+			&elem.Owner, &elem.Name, &elem.Package,
+			&elem.Length, &elem.Prec, &elem.Scale,
+			&elem.Charset, &elem.IndexBy,
+			&elem.TypeCode,
 		); err != nil {
-			return plus, err
+			return err
+		}
+		tr.types[elem.TypeName] = elem
+		typ.CollectionOf = elem.TypeName
+
+	case "PL/SQL RECORD":
+		/*
+				"plsTyp": `SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
+				  length, precision, scale, character_set_name,
+				  (SELECT MIN(typecode) FROM all_plsql_types B
+					 WHERE B.owner = A.attr_type_owner AND B.type_name = A.attr_type_name AND B.package_name = A.attr_type_package) typecode
+			 FROM all_plsql_type_attrs A
+			 WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
+			 ORDER BY attr_no`,
+		*/
+		if rows, err = tr.stmts["plsTyp"].QueryContext(ctx,
+			sql.Named("owner", tn.Owner), sql.Named("pkg", tn.Package), sql.Named("sub", tn.Name),
+		); err != nil {
+			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var t dbType
-			var indexBy, typeCode string
-			if err = rows.Scan(&t.Data, &t.Owner, &t.Subname, &t.Name,
-				&t.Length, &t.Prec, &t.Scale, &t.Charset, &indexBy, &typeCode,
+			var t Type
+			if err = rows.Scan(&t.Attr, &t.Owner, &t.Name, &t.Package,
+				&t.Length, &t.Prec, &t.Scale, &t.Charset, &t.TypeCode,
 			); err != nil {
-				return plus, err
+				return err
 			}
-			if typeCode != "COLLECTION" {
-				t.Data = typeCode
-			}
-			if t.Data == "" {
-				t.Data = t.Subname
-			}
-			if t.Data == "PL/SQL INDEX TABLE" {
-				t.Data = "PL/SQL TABLE"
-			}
-			t.Level = 1
-			plus = append(plus, t)
+			tr.types[t.TypeName] = t
+			typ.RecordOf = append(typ.RecordOf, t.TypeName)
 		}
 
 	case "REF CURSOR":
-		/*
-			ARGUMENT_NAME	SEQUENCE	DATA_LEVEL	DATA_TYPE
-			        	1	0	REF CURSOR
-			        	2	1	PL/SQL RECORD
-			SZERZ_AZON	3	2	NUMBER
-			UZENET_TIP	4	2	CHAR
-			HIBAKOD  	5	2	VARCHAR2
-			DATUM   	6	2	DATE
-			UTOLSO_TIP	7	2	CHAR
-			JAVITVA  	8	2	VARCHAR2
-			P_IDO_TOL	9	0	DATE
-			P_IDO_IG	10	0	DATE
-		*/
-		plus = append(plus, dbType{Owner: owner, Name: pkg, Subname: sub, Data: "PL/SQL RECORD", Level: 1})
+		typ.CollectionOf = typ.TypeName
+		err = tr.Resolve(ctx, "PL/SQL RECORD", tn)
 
-	case "PL/SQL RECORD":
-		/*SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
-		                      length, precision, scale, character_set_name, attr_no
-					     FROM all_plsql_type_attrs
-						 WHERE owner = :1 AND package_name = :2 AND type_name = :3
-						 ORDER BY attr_no*/
-		if rows, err = tr["plsTyp"].QueryContext(ctx,
-			sql.Named("owner", owner), sql.Named("pkg", pkg), sql.Named("sub", sub),
-		); err != nil {
-			return plus, err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var t dbType
-			var attrNo sql.NullInt64
-			var typeCode string
-			if err = rows.Scan(&t.Argument, &t.Owner, &t.Subname, &t.Name,
-				&t.Length, &t.Prec, &t.Scale, &t.Charset, &attrNo, &typeCode,
-			); err != nil {
-				return plus, err
-			}
-			t.Data = typeCode
-			if typeCode == "COLLECTION" {
-				t.Data = "PL/SQL TABLE"
-			}
-			if t.Owner == "" && t.Subname != "" {
-				t.Data = t.Subname
-			}
-			if t.Data == "PL/SQL INDEX TABLE" {
-				t.Data = "PL/SQL TABLE"
-			}
-			t.Level = 1
-			plus = append(plus, t)
-		}
 	default:
-		return nil, errors.Errorf("%s: %w", typ, errors.New("unknown type"))
+		return errors.Errorf("%s: %w", typ, errors.New("unknown type"))
 	}
 	if rows != nil {
-		err = rows.Err()
+		if rowsErr := rows.Err(); rowsErr != nil && err == nil {
+			err = rowsErr
+		}
 	}
-	if len(plus) == 0 && err == nil {
-		err = errors.Errorf("%s/%s.%s.%s: %w", typ, owner, pkg, sub, errors.New("not found"))
-	}
-	return typ, err
+	return err
 }
 
 type querier interface {
