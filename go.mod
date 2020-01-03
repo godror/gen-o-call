@@ -17,9 +17,6 @@ require (
 	github.com/tgulacsi/go v0.8.0
 	github.com/tgulacsi/oracall v0.13.1 // indirect
 	golang.org/x/sync v0.0.0-20190911185100-cd5d95a43a6e
-	golang.org/x/sys v0.0.0-20190904154756-749cb33beabd // indirect
 	golang.org/x/xerrors v0.0.0-20191204190536-9bdfabe68543
 	google.golang.org/grpc v1.23.0
-	honnef.co/go/js/dom v0.0.0-20160310112645-24aa052bc5c6 // indirect
-	myitcv.io v0.0.0-20180717150903-bf2c84553c78 // indirect
 )

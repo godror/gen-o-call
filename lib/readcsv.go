@@ -80,7 +80,7 @@ func ParseCsv(r io.Reader, filter func(string) bool) (functions []Function, err 
 	if err != nil {
 		return nil, err
 	}
-	return ParseArguments(filteredArgs, filter)
+	return ParseArguments(filteredArgs, filter, nil)
 }
 
 func FilterAndGroup(userArgs []UserArgument, filter func(string) bool) (filteredArgs [][]UserArgument, err error) {
@@ -211,7 +211,7 @@ func ReadCsv(r io.Reader) (userArgs []UserArgument, err error) {
 	return userArgs, err
 }
 
-func ParseArguments(userArgs [][]UserArgument, filter func(string) bool) (functions []Function, err error) {
+func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types map[TypeName]*Type) (functions []Function, err error) {
 	// Split args by functions
 	var dumpBuf strings.Builder
 	dumpEnc := xml.NewEncoder(&dumpBuf)
@@ -253,6 +253,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool) (functi
 				ua.DataPrecision,
 				ua.DataScale,
 				ua.CharLength,
+				types[TypeName{Owner: ua.TypeOwner, Package: ua.TypeName, Name: ua.TypeSubname}],
 			)
 			//Log("level", level, "arg", arg.Name, "type", ua.DataType, "last", lastArgs, "flavor", arg.Flavor)
 			// Possibilities:

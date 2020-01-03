@@ -173,7 +173,7 @@ func (a Argument) IsOutput() bool {
 }
 
 func NewArgument(name, dataType, plsType, typeName, dirName string, dir direction,
-	charset string, precision, scale uint8, charlength uint) Argument {
+	charset string, precision, scale uint8, charlength uint, typ *Type) Argument {
 
 	name = strings.ToLower(name)
 	if typeName == "..@" {
@@ -202,9 +202,12 @@ func NewArgument(name, dataType, plsType, typeName, dirName string, dir directio
 		Precision: precision, Scale: scale, Charlength: charlength,
 		Charset: charset,
 		mu:      new(sync.Mutex),
+		AbsType: dataType,
 	}
 	if arg.ora == "" {
-		panic(fmt.Sprintf("empty PLS type of %#v", arg))
+		if typ == nil {
+			panic(fmt.Sprintf("empty PLS type of %#v, typ=%#v", arg, typ))
+		}
 	}
 	switch arg.Type {
 	case "PL/SQL RECORD":
@@ -234,8 +237,6 @@ func NewArgument(name, dataType, plsType, typeName, dirName string, dir directio
 		}
 	case "PLS_INTEGER", "BINARY_INTEGER":
 		arg.AbsType = "INTEGER(10)"
-	default:
-		arg.AbsType = arg.Type
 	}
 	return arg
 }

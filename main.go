@@ -98,7 +98,6 @@ func Main(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	var functions []genocall.Function
 	var err error
 
 	filters := [](func(string) bool){func(string) bool { return true }}
@@ -123,7 +122,6 @@ func Main(args []string) error {
 		})
 	}
 
-	var annotations []genocall.Annotation
 	db, err := sql.Open("godror", *flagConnect)
 	if err != nil {
 		return errors.Errorf("connect to %s: %w", *flagConnect, err)
@@ -138,7 +136,7 @@ func Main(args []string) error {
 	}
 	defer tx.Rollback()
 
-	functions, annotations, err = genocall.ReadDB(ctx, tx, pattern, filter)
+	functions, annotations, err := genocall.ReadDB(ctx, tx, pattern, filter)
 	if err != nil {
 		return errors.Errorf("read %s: %w", flag.Arg(0), err)
 	}

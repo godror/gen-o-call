@@ -9,6 +9,7 @@ package genocall
 import (
 	"context"
 	"database/sql"
+	"sync"
 	"fmt"
 	"io"
 	"regexp"
@@ -202,7 +203,7 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 	if err != nil {
 		return functions, annotations, err
 	}
-	if functions, err = ParseArguments(filteredArgs, filter); err != nil {
+	if functions, err = ParseArguments(filteredArgs, filter, tr.Types()); err != nil {
 		return functions, annotations, err
 	}
 	funcs := make(map[string]int, len(functions))
@@ -283,7 +284,6 @@ func getSource(ctx context.Context, w io.Writer, cx querier, packageName string)
 	return nil
 }
 
-//var rReplace = regexp.MustCompile(`\s*=>\s*`)
 var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
 type Type struct {
@@ -291,20 +291,25 @@ type Type struct {
 	Attr                       string
 	Charset, IndexBy, TypeCode string
 	Length, Prec, Scale        sql.NullInt64
-	CollectionOf               TypeName
-	RecordOf                   []TypeName
+	CollectionOf               *Type
+	RecordOf                   []*Type
 }
 
 type TypeName struct {
 	Owner, Package, Name string
 }
 type typeResolver struct {
-	types map[TypeName]Type
+	mu sync.Mutex
+	types map[TypeName]*Type
 	stmts map[string]*sql.Stmt
 }
 
+func (tr *typeResolver) Types() map[TypeName]*Type { tr.mu.Lock()
+defer tr.mu.Unlock()
+return tr.types }
+
 func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
-	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]Type)}
+	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]*Type)}
 	for nm, qry := range map[string]string{
 		"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
 			   length, precision, scale, character_set_name, index_by,
@@ -351,6 +356,8 @@ func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
 }
 
 func (tr *typeResolver) Close() error {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
 	var firstErr error
 	stmts := tr.stmts
 	tr.stmts = nil
@@ -365,7 +372,15 @@ func (tr *typeResolver) Close() error {
 }
 
 func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) error {
+	tr.mu.Lock()
+	if old := tr.types[tn]; old != nil {
+	tr.mu.Unlock()
+		return nil
+	}
 	typ := Type{TypeName: tn, TypeCode: data}
+	tr.types[typ.TypeName] = &typ
+	tr.mu.Unlock()
+
 	var rows *sql.Rows
 	var err error
 	switch data {
@@ -405,8 +420,14 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 		); err != nil {
 			return err
 		}
-		tr.types[elem.TypeName] = elem
-		typ.CollectionOf = elem.TypeName
+		tr.mu.Lock()
+		if old := tr.types[elem.TypeName]; old != nil {
+			typ.CollectionOf = old
+		} else {
+			tr.types[elem.TypeName] = &elem
+			typ.CollectionOf = &elem
+		}
+		tr.mu.Unlock()
 
 	case "PL/SQL RECORD":
 		/*
@@ -431,13 +452,27 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 			); err != nil {
 				return err
 			}
-			tr.types[t.TypeName] = t
-			typ.RecordOf = append(typ.RecordOf, t.TypeName)
+			tr.mu.Lock()
+			if old := tr.types[t.TypeName]; old != nil {
+				typ.RecordOf = append(typ.RecordOf, old)
+			} else {
+				tr.types[t.TypeName] = &t
+				typ.RecordOf = append(typ.RecordOf, &t)
+			}
+			tr.mu.Unlock()
 		}
 
 	case "REF CURSOR":
-		typ.CollectionOf = typ.TypeName
-		err = tr.Resolve(ctx, "PL/SQL RECORD", tn)
+		tr.mu.Lock()
+		typ.CollectionOf = tr.types[typ.TypeName]
+		tr.mu.Unlock()
+		if typ.CollectionOf == nil {
+			if err = tr.Resolve(ctx, "PL/SQL RECORD", tn); err == nil {
+				tr.mu.Lock()
+				typ.CollectionOf = tr.types[typ.TypeName]
+				tr.mu.Unlock()
+			}
+		}
 
 	default:
 		return errors.Errorf("%v: %w", typ, errors.New("unknown type"))
