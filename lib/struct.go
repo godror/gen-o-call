@@ -29,12 +29,12 @@ const (
 
 type Function struct {
 	Package, name, alias string
-	Returns              *Argument
-	Args                 []Argument
-	Documentation        string
-	Replacement          *Function
-	ReplacementIsJSON    bool
-	LastDDL              time.Time
+	Returns              *Argument  `json:",omitempty"`
+	Args                 []Argument `json:",omitempty"`
+	Documentation        string     `json:",omitempty"`
+	Replacement          *Function  `json:",omitempty"`
+	ReplacementIsJSON    bool       `json:",omitempty"`
+	LastDDL              time.Time  `json:",omitempty"`
 	handle               []string
 	maxTableSize         int
 }

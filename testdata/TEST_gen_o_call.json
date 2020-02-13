@@ -1,0 +1,346 @@
+[
+    {
+      "Package": "TEST_GEN_O_CALL",
+      "Returns": {
+        "RecordOf": null,
+        "Name": "ret",
+        "Type": "BINARY_INTEGER",
+        "TypeName": "",
+        "AbsType": "INTEGER(10)",
+        "Charset": "",
+        "Charlength": 0,
+        "TableOf": null,
+        "Flavor": "SIMPLE",
+        "Direction": "OUT",
+        "Precision": 0,
+        "Scale": 0
+      },
+      "Args": [
+        {
+          "RecordOf": [],
+          "Name": "p_rec",
+          "Type": "PL/SQL RECORD",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.REC_T",
+          "AbsType": "PL/SQL RECORD",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "RECORD",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_plsint",
+          "Type": "BINARY_INTEGER",
+          "TypeName": "",
+          "AbsType": "INTEGER(10)",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_num",
+          "Type": "NUMBER",
+          "TypeName": "",
+          "AbsType": "NUMBER",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_vc",
+          "Type": "VARCHAR2",
+          "TypeName": "",
+          "AbsType": "VARCHAR2(32767)",
+          "Charset": "CHAR_CS",
+          "Charlength": 32767,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_dt",
+          "Type": "DATE",
+          "TypeName": "",
+          "AbsType": "DATE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        }
+      ],
+      "LastDDL": "2020-02-13T13:58:53+01:00"
+    },
+    {
+      "Package": "TEST_GEN_O_CALL",
+      "Returns": {
+        "RecordOf": null,
+        "Name": "ret",
+        "Type": "BINARY_INTEGER",
+        "TypeName": "",
+        "AbsType": "INTEGER(10)",
+        "Charset": "",
+        "Charlength": 0,
+        "TableOf": null,
+        "Flavor": "SIMPLE",
+        "Direction": "OUT",
+        "Precision": 0,
+        "Scale": 0
+      },
+      "Args": [
+        {
+          "RecordOf": [],
+          "Name": "p_rec_rec",
+          "Type": "PL/SQL RECORD",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.REC_REC_T",
+          "AbsType": "PL/SQL RECORD",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "RECORD",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        }
+      ],
+      "LastDDL": "2020-02-13T13:58:53+01:00"
+    },
+    {
+      "Package": "TEST_GEN_O_CALL",
+      "Returns": {
+        "RecordOf": null,
+        "Name": "ret",
+        "Type": "PL/SQL TABLE",
+        "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.PLSINT_T",
+        "AbsType": "PL/SQL TABLE",
+        "Charset": "",
+        "Charlength": 0,
+        "TableOf": null,
+        "Flavor": "TABLE",
+        "Direction": "OUT",
+        "Precision": 0,
+        "Scale": 0
+      },
+      "Args": [
+        {
+          "RecordOf": null,
+          "Name": "p_rec_rec_tab_tab",
+          "Type": "PL/SQL TABLE",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.REC_REC_TT",
+          "AbsType": "PL/SQL TABLE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "TABLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        }
+      ],
+      "LastDDL": "2020-02-13T13:58:53+01:00"
+    },
+    {
+      "Package": "TEST_GEN_O_CALL",
+      "Returns": {
+        "RecordOf": null,
+        "Name": "ret",
+        "Type": "BINARY_INTEGER",
+        "TypeName": "",
+        "AbsType": "INTEGER(10)",
+        "Charset": "",
+        "Charlength": 0,
+        "TableOf": null,
+        "Flavor": "SIMPLE",
+        "Direction": "OUT",
+        "Precision": 0,
+        "Scale": 0
+      },
+      "Args": [
+        {
+          "RecordOf": null,
+          "Name": "p_rec_tab",
+          "Type": "PL/SQL TABLE",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.REC_TT",
+          "AbsType": "PL/SQL TABLE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "TABLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        }
+      ],
+      "LastDDL": "2020-02-13T13:58:53+01:00"
+    },
+    {
+      "Package": "TEST_GEN_O_CALL",
+      "Returns": {
+        "RecordOf": null,
+        "Name": "ret",
+        "Type": "BINARY_INTEGER",
+        "TypeName": "",
+        "AbsType": "INTEGER(10)",
+        "Charset": "",
+        "Charlength": 0,
+        "TableOf": null,
+        "Flavor": "SIMPLE",
+        "Direction": "OUT",
+        "Precision": 0,
+        "Scale": 0
+      },
+      "Args": [
+        {
+          "RecordOf": null,
+          "Name": "p_plsint",
+          "Type": "BINARY_INTEGER",
+          "TypeName": "",
+          "AbsType": "INTEGER(10)",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_num",
+          "Type": "NUMBER",
+          "TypeName": "",
+          "AbsType": "NUMBER",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_vc",
+          "Type": "VARCHAR2",
+          "TypeName": "",
+          "AbsType": "VARCHAR2(32767)",
+          "Charset": "CHAR_CS",
+          "Charlength": 32767,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_dt",
+          "Type": "DATE",
+          "TypeName": "",
+          "AbsType": "DATE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "SIMPLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        }
+      ],
+      "LastDDL": "2020-02-13T13:58:53+01:00"
+    },
+    {
+      "Package": "TEST_GEN_O_CALL",
+      "Returns": {
+        "RecordOf": null,
+        "Name": "ret",
+        "Type": "PL/SQL TABLE",
+        "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.PLSINT_T",
+        "AbsType": "PL/SQL TABLE",
+        "Charset": "",
+        "Charlength": 0,
+        "TableOf": null,
+        "Flavor": "TABLE",
+        "Direction": "OUT",
+        "Precision": 0,
+        "Scale": 0
+      },
+      "Args": [
+        {
+          "RecordOf": null,
+          "Name": "p_plsint_tab",
+          "Type": "PL/SQL TABLE",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.PLSINT_T",
+          "AbsType": "PL/SQL TABLE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "TABLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_num_tab",
+          "Type": "PL/SQL TABLE",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.NUM_T",
+          "AbsType": "PL/SQL TABLE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "TABLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_vc",
+          "Type": "PL/SQL TABLE",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.VC_T",
+          "AbsType": "PL/SQL TABLE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "TABLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        },
+        {
+          "RecordOf": null,
+          "Name": "p_dt",
+          "Type": "PL/SQL TABLE",
+          "TypeName": "BRUNO_OWNER.TEST_GEN_O_CALL.DT_T",
+          "AbsType": "PL/SQL TABLE",
+          "Charset": "",
+          "Charlength": 0,
+          "TableOf": null,
+          "Flavor": "TABLE",
+          "Direction": "INOUT",
+          "Precision": 0,
+          "Scale": 0
+        }
+      ],
+      "LastDDL": "2020-02-13T13:58:53+01:00"
+    }
+  ]

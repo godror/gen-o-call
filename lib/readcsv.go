@@ -23,32 +23,32 @@ import (
 
 // UserArgument represents the required info from the user_arguments view
 type UserArgument struct {
-	PackageName string `sql:"PACKAGE_NAME"`
-	ObjectName  string `sql:"OBJECT_NAME"`
-	LastDDL     time.Time
+	PackageName string    `sql:"PACKAGE_NAME"`
+	ObjectName  string    `sql:"OBJECT_NAME"`
+	LastDDL     time.Time `json:",omitempty"`
 
 	ArgumentName string `sql:"ARGUMENT_NAME"`
 	InOut        string `sql:"IN_OUT"`
 
 	DataType string `sql:"DATA_TYPE"`
 
-	CharacterSetName string `sql:"CHARACTER_SET_NAME"`
+	CharacterSetName string `sql:"CHARACTER_SET_NAME" json:",omitempty"`
 
-	PlsType     string `sql:"PLS_TYPE"`
-	TypeLink    string `sql:"TYPE_LINK"`
-	TypeOwner   string `sql:"TYPE_OWNER"`
-	TypeName    string `sql:"TYPE_NAME"`
-	TypeSubname string `sql:"TYPE_SUBNAME"`
+	PlsType     string `sql:"PLS_TYPE" json:",omitempty"`
+	TypeLink    string `sql:"TYPE_LINK" json:",omitempty"`
+	TypeOwner   string `sql:"TYPE_OWNER" json:",omitempty"`
+	TypeName    string `sql:"TYPE_NAME" json:",omitempty"`
+	TypeSubname string `sql:"TYPE_SUBNAME" json:",omitempty"`
 
-	ObjectID     uint `sql:"OBJECT_ID"`
-	SubprogramID uint `sql:"SUBPROGRAM_ID"`
+	ObjectID     uint `sql:"OBJECT_ID" json:",omitempty"`
+	SubprogramID uint `sql:"SUBPROGRAM_ID" json:",omitempty"`
 
-	CharLength uint `sql:"CHAR_LENGTH"`
-	Position   uint `sql:"POSITION"`
+	CharLength uint `sql:"CHAR_LENGTH" json:"CharLength,omitempty"`
+	Position   uint `sql:"POSITION" json:",omitempty"`
 
-	DataPrecision uint8 `sql:"DATA_PRECISION"`
-	DataScale     uint8 `sql:"DATA_SCALE"`
-	DataLevel     uint8 `sql:"DATA_LEVEL"`
+	DataPrecision uint8 `sql:"DATA_PRECISION" json:",omitempty"`
+	DataScale     uint8 `sql:"DATA_SCALE" json:",omitempty"`
+	DataLevel     uint8 `sql:"DATA_LEVEL" json:",omitempty"`
 }
 
 // ParseCsv reads the given csv file as user_arguments

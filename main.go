@@ -19,6 +19,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
@@ -74,6 +75,8 @@ func Main(args []string) error {
 	flagVerbose := flag.Bool("v", false, "verbose logging")
 	flagExcept := flag.String("except", "", "except these functions")
 	flagReplace := flag.String("replace", "", "funcA=>funcB")
+	flagTestOut := flag.Bool("test-out", false, "output test data")
+	flagJsonIn := flag.String("json", "", "JSON input data")
 	flag.IntVar(&genocall.MaxTableSize, "max-table-size", genocall.MaxTableSize, "maximum table size for PL/SQL associative arrays")
 
 	flag.Parse()
@@ -122,23 +125,61 @@ func Main(args []string) error {
 		})
 	}
 
-	db, err := sql.Open("godror", *flagConnect)
-	if err != nil {
-		return errors.Errorf("connect to %s: %w", *flagConnect, err)
-	}
-	defer db.Close()
-	if *flagVerbose {
-		godror.Log = log.With(logger, "lib", "godror").Log
-	}
-	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
+	var functions []genocall.Function
+	if *flagJsonIn != "" {
+		fh, err := os.Open(*flagJsonIn)
+		if err != nil {
+			return err
+		}
+		err = json.NewDecoder(fh).Decode(&functions)
+		fh.Close()
+		if err != nil {
+			return err
+		}
+	} else {
+		db, err := sql.Open("godror", *flagConnect)
+		if err != nil {
+			return errors.Errorf("connect to %s: %w", *flagConnect, err)
+		}
+		defer db.Close()
+		if *flagVerbose {
+			godror.Log = log.With(logger, "lib", "godror").Log
+		}
+		tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
 
-	functions, annotations, err := genocall.ReadDB(ctx, tx, pattern, filter)
-	if err != nil {
-		return errors.Errorf("read %s: %w", flag.Arg(0), err)
+		var annotations []genocall.Annotation
+		functions, annotations, err = genocall.ReadDB(ctx, tx, pattern, filter)
+		if err != nil {
+			return errors.Errorf("read %s: %w", flag.Arg(0), err)
+		}
+		*flagReplace = strings.TrimSpace(*flagReplace)
+		for _, elt := range strings.FieldsFunc(
+			rReplace.ReplaceAllLiteralString(*flagReplace, "=>"),
+			func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
+			i := strings.Index(elt, "=>")
+			if i < 0 {
+				continue
+			}
+			a := genocall.Annotation{Type: "replace", Name: elt[:i], Other: elt[i+2:]}
+			if i = strings.IndexByte(a.Name, '.'); i >= 0 {
+				a.Package, a.Name = a.Name[:i], a.Name[i+1:]
+				a.Other = strings.TrimPrefix(a.Other, a.Package)
+			}
+			annotations = append(annotations, a)
+		}
+		Log("annotations", annotations)
+		functions = genocall.ApplyAnnotations(functions, annotations)
+		sort.Slice(functions, func(i, j int) bool { return functions[i].Name() < functions[j].Name() })
+
+		if *flagTestOut {
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("  ", "  ")
+			enc.Encode(functions)
+		}
 	}
 
 	defer os.Stdout.Sync()
@@ -168,25 +209,6 @@ func Main(args []string) error {
 			}
 		}()
 	}
-
-	*flagReplace = strings.TrimSpace(*flagReplace)
-	for _, elt := range strings.FieldsFunc(
-		rReplace.ReplaceAllLiteralString(*flagReplace, "=>"),
-		func(r rune) bool { return r == ',' || unicode.IsSpace(r) }) {
-		i := strings.Index(elt, "=>")
-		if i < 0 {
-			continue
-		}
-		a := genocall.Annotation{Type: "replace", Name: elt[:i], Other: elt[i+2:]}
-		if i = strings.IndexByte(a.Name, '.'); i >= 0 {
-			a.Package, a.Name = a.Name[:i], a.Name[i+1:]
-			a.Other = strings.TrimPrefix(a.Other, a.Package)
-		}
-		annotations = append(annotations, a)
-	}
-	Log("annotations", annotations)
-	functions = genocall.ApplyAnnotations(functions, annotations)
-	sort.Slice(functions, func(i, j int) bool { return functions[i].Name() < functions[j].Name() })
 
 	var grp errgroup.Group
 	grp.Go(func() error {
