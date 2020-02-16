@@ -1,5 +1,5 @@
 /*
-Copyright 2019 Tamás Gulácsi
+Copyright 2020 Tamás Gulácsi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package genocall
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"io/ioutil"
@@ -56,6 +57,16 @@ func TestJSON(t *testing.T) {
 			t.Error(err)
 		}
 		t.Log(funcs)
+
+		for i := range funcs {
+			f := funcs[i]
+			t.Run(f.Name(), func(t *testing.T) {
+				var buf bytes.Buffer
+				if err = SaveFunctions(&buf, []Function{f}, f.Package, "test", true); err != nil {
+					t.Error(err)
+				}
+			})
+		}
 	}
 }
 
