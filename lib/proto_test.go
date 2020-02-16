@@ -91,7 +91,7 @@ func TestParseArgDocs(t *testing.T) {
 		var got argDocs
 		got.Parse(tC.In)
 		if diff := cmp.Diff(got, tC.Want); diff != "" {
-			t.Errorf("%s. got %+v, wanted %+v", tC.Name, got, tC.Want)
+			t.Errorf("%s.\ngot %+v,\nwanted %+v\ndiff %s", tC.Name, got, tC.Want, diff)
 		}
 	}
 }

@@ -18,6 +18,10 @@ package genocall
 
 import (
 	"context"
+	"encoding/json"
+	"io/ioutil"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -26,6 +30,34 @@ import (
 
 	"github.com/kylelemons/godebug/diff"
 )
+
+func TestJSON(t *testing.T) {
+	fis, err := ioutil.ReadDir("testdata")
+	if len(fis) == 0 {
+		if err == nil {
+			t.Skip("no test JSON")
+		}
+		t.Fatal(err)
+	}
+	for _, fi := range fis {
+		if !(fi.Mode().IsRegular() && strings.HasSuffix(fi.Name(), ".json")) {
+			continue
+		}
+		t.Logf(fi.Name())
+		fh, err := os.Open(filepath.Join("testdata", fi.Name()))
+		if err != nil {
+			t.Error(err)
+			continue
+		}
+		var funcs []Function
+		err = json.NewDecoder(fh).Decode(&funcs)
+		fh.Close()
+		if err != nil {
+			t.Error(err)
+		}
+		t.Log(funcs)
+	}
+}
 
 func TestParseDocs(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)

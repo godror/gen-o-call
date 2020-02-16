@@ -103,6 +103,19 @@ func (dir direction) String() string {
 func (dir direction) MarshalText() ([]byte, error) {
 	return []byte(dir.String()), nil
 }
+func (dir *direction) UnmarshalText(p []byte) error {
+	switch string(p) {
+	case "IN":
+		*dir = DIR_IN
+	case "OUT":
+		*dir = DIR_OUT
+	case "INOUT":
+		*dir = DIR_INOUT
+	default:
+		return fmt.Errorf("unknown dir %q", string(p))
+	}
+	return nil
+}
 
 const (
 	DIR_IN    = direction(1)
@@ -125,6 +138,19 @@ func (f flavor) String() string {
 }
 func (f flavor) MarshalText() ([]byte, error) {
 	return []byte(f.String()), nil
+}
+func (f *flavor) UnmarshalText(p []byte) error {
+	switch string(p) {
+	case "SIMPLE":
+		*f = FLAVOR_SIMPLE
+	case "RECORD":
+		*f = FLAVOR_RECORD
+	case "TABLE":
+		*f = FLAVOR_TABLE
+	default:
+		return fmt.Errorf("unknown flavor %q", string(p))
+	}
+	return nil
 }
 
 const (
