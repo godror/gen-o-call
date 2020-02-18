@@ -126,7 +126,7 @@ FunLoop:
 		for _, dir := range []bool{false, true} {
 			if err = fun.SaveStruct(structW, dir); err != nil {
 				if SkipMissingTableOf && (errors.Is(err, ErrMissingTableOf) || errors.Is(err, UnknownSimpleType)) {
-					Log("msg", "SKIP function, missing TableOf info", "function", fun.Name(), "error", err)
+					Log("msg", "SKIP function, missing TableOf info", "function", fun.FullName(), "error", err)
 					continue FunLoop
 				}
 				return err
@@ -137,11 +137,11 @@ FunLoop:
 		io.WriteString(w, plsBlock)
 		io.WriteString(w, "`\n\n")
 		if b, err = format.Source([]byte(callFun)); err != nil {
-			Log("msg", "saving function", "function", fun.Name(), "error", err)
+			Log("msg", "saving function", "function", fun.FullName(), "error", err)
 			os.Stderr.WriteString("\n\n---------------------8<--------------------\n")
 			os.Stderr.WriteString(callFun)
 			os.Stderr.WriteString("\n--------------------->8--------------------\n\n")
-			return fmt.Errorf("error saving function %s: %s", fun.Name(), err)
+			return fmt.Errorf("error saving function %s: %s", fun.FullName(), err)
 		}
 		w.Write(b)
 	}
@@ -260,10 +260,7 @@ func TestCalls(t *testing.T) {
 `)
 	}
 	FN := func(f Function) string {
-		fn := f.name
-		if f.alias != "" {
-			fn = f.alias
-		}
+		fn := f.AliasedName()
 		return CamelCase(strings.Replace(fn, ".", "__", -1))
 	}
 
@@ -310,10 +307,7 @@ var TestFunctions = map[string]func(t *testing.T, jsonText []byte) {
 }
 
 func (f Function) getPlsqlConstName() string {
-	nm := f.name
-	if f.alias != "" {
-		nm = f.alias
-	}
+	nm := f.AliasedName()
 	return capitalize(f.Package + "__" + nm + "__plsql")
 }
 
@@ -322,10 +316,7 @@ func (f Function) getStructName(out, withPackage bool) string {
 	if out {
 		dirname = "output"
 	}
-	nm := f.name
-	if f.alias != "" {
-		nm = f.alias
-	}
+	nm := f.AliasedName()
 	if !withPackage {
 		return nm + "__" + dirname
 	}
@@ -364,13 +355,13 @@ func (f Function) SaveStruct(dst io.Writer, out bool) error {
 	// %s %s
 	type %s struct {
 		XMLName xml.Name `+"`json:\"-\" xml:\"%s\"`"+`
-		`, f.Name(), dirname, structName, strings.ToLower(structName[:1])+structName[1:],
+		`, f.FullName(), dirname, structName, strings.ToLower(structName[:1])+structName[1:],
 	)
 
 	//Log("msg","SaveStruct", "function", fmt.Sprintf("%#v", f) )
 	for _, arg := range args {
 		if arg.Flavor == FLAVOR_TABLE && arg.TableOf == nil {
-			return errors.Errorf("no table of data for %s.%s (%v): %w", f.Name(), arg, arg, ErrMissingTableOf)
+			return errors.Errorf("no table of data for %s.%s (%v): %w", f.FullName(), arg, arg, ErrMissingTableOf)
 		}
 		//aName = capitalize(goName(arg.Name))
 		aName = capitalize(replHidden(arg.Name))

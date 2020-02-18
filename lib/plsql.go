@@ -30,12 +30,9 @@ func (fun Function) PlsqlBlock(checkName string) (plsql, callFun string) {
 	decls, pre, call, post, convIn, convOut, err := fun.prepareCall()
 	if err != nil {
 		Log("msg", "error preparing", "function", fun, "error", err)
-		panic(errors.Errorf("%s: %w", fun.Name(), err))
+		panic(errors.Errorf("%s: %w", fun.FullName(), err))
 	}
-	fn := fun.name
-	if fun.alias != "" {
-		fn = fun.alias
-	}
+	fn := fun.AliasedName()
 	fn = strings.Replace(fn, ".", "__", -1)
 
 	plsBuf := Buffers.Get()
@@ -58,7 +55,7 @@ func (fun Function) PlsqlBlock(checkName string) (plsql, callFun string) {
 		plsBuf.WriteString("  BEGIN\n  ")
 	}
 	fmt.Fprintf(plsBuf, "  %s;\n", call)
-	//Log("handle", fun.handle, "fun", fun.Name())
+	//Log("handle", fun.handle, "fun", fun.FullName())
 	if len(fun.handle) != 0 {
 		fmt.Fprintf(plsBuf, "  EXCEPTION WHEN %s THEN NULL;\n  END;\n",
 			strings.Join(fun.handle, " OR "))
@@ -147,7 +144,7 @@ if true || DebugLevel > 0 {
 }
 	qry := %s
 `,
-		fun.Name(),
+		fun.FullName(),
 		call[i:j], rIdentifier.ReplaceAllString(pls, "'%#v'"),
 		fun.getPlsqlConstName())
 	callBuf.WriteString(`
@@ -367,7 +364,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 		}
 
 		if repl.Returns != nil {
-			call = fmt.Sprintf(":2 := %s(%s=>v_in)", repl.Name(), repl.Args[0].Name)
+			call = fmt.Sprintf(":2 := %s(%s=>v_in)", repl.FullName(), repl.Args[0].Name)
 		} else {
 			var argIn, argOut *Argument
 			for i, a := range repl.Args {
@@ -448,7 +445,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 				name, addParam(arg.Name))
 
 		case FLAVOR_RECORD:
-			vn = getInnerVarName(fun.Name(), arg.Name)
+			vn = getInnerVarName(fun.FullName(), arg.Name)
 			if arg.TypeName == "" {
 				arg.TypeName = mkRecTypName(arg.Name)
 				decls = append(decls, "TYPE "+arg.TypeName+" IS RECORD (")
@@ -492,7 +489,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 			for _, a := range arg.RecordOf {
 				a := a
 				k, v := a.Name, a.Argument
-				tmp = getParamName(fun.Name(), vn+"."+k)
+				tmp = getParamName(fun.FullName(), vn+"."+k)
 				kName := (CamelCase(k))
 				//kName := capitalize(replHidden(k))
 				name := aname + "." + kName
@@ -531,7 +528,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 					}
 					decls = append(decls, arg.Name+" "+typ+setvar+"; --A="+arg.Name)
 
-					vn = getInnerVarName(fun.Name(), arg.Name)
+					vn = getInnerVarName(fun.FullName(), arg.Name)
 					callArgs[arg.Name] = vn
 					decls = append(decls, vn+" "+arg.TypeName+"; --B="+arg.Name)
 					if arg.IsInput() {
@@ -559,7 +556,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						name, addParam(arg.Name), maxTableSize)
 
 				case FLAVOR_RECORD:
-					vn = getInnerVarName(fun.Name(), arg.Name+"."+arg.TableOf.Name)
+					vn = getInnerVarName(fun.FullName(), arg.Name+"."+arg.TableOf.Name)
 					callArgs[arg.Name] = vn
 					decls = append(decls, vn+" "+arg.TypeName+"; --C="+arg.Name)
 
@@ -594,9 +591,9 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 							err = errors.Errorf("nonsense table type of %s", arg)
 							return
 						}
-						decls = append(decls, getParamName(fun.Name(), vn+"."+k)+" "+typ+"; --D="+arg.Name)
+						decls = append(decls, getParamName(fun.FullName(), vn+"."+k)+" "+typ+"; --D="+arg.Name)
 
-						tmp = getParamName(fun.Name(), vn+"."+k)
+						tmp = getParamName(fun.FullName(), vn+"."+k)
 						if arg.IsInput() {
 							pre = append(pre, tmp+" := :"+tmp+";")
 						} else {
@@ -610,10 +607,10 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						a := a
 						k, v := a.Name, a.Argument
 
-						tmp = getParamName(fun.Name(), vn+"."+k)
+						tmp = getParamName(fun.FullName(), vn+"."+k)
 
 						if idxvar == "" {
-							idxvar = getParamName(fun.Name(), vn+"."+k)
+							idxvar = getParamName(fun.FullName(), vn+"."+k)
 							if arg.IsInput() {
 								pre = append(pre, "",
 									"i1 := "+idxvar+".FIRST;",
@@ -657,18 +654,18 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						for _, a := range arg.TableOf.RecordOf {
 							a := a
 							k := a.Name
-							tmp = getParamName(fun.Name(), vn+"."+k)
+							tmp = getParamName(fun.FullName(), vn+"."+k)
 							post = append(post, ":"+tmp+" := "+tmp+";")
 						}
 					}
 				default:
-					Log("msg", "Only table of simple or record types are allowed (no table of table!)", "function", fun.Name(), "arg", arg.Name)
-					panic(errors.Errorf("Only table of simple or record types are allowed (no table of table!) - %s(%v)", fun.Name(), arg.Name))
+					Log("msg", "Only table of simple or record types are allowed (no table of table!)", "function", fun.FullName(), "arg", arg.Name)
+					panic(errors.Errorf("Only table of simple or record types are allowed (no table of table!) - %s(%v)", fun.FullName(), arg.Name))
 				}
 			}
 		default:
 			Log("msg", "unkown flavor", "flavor", arg.Flavor)
-			panic(errors.Errorf("unknown flavor %s(%v)", fun.Name(), arg.Name))
+			panic(errors.Errorf("unknown flavor %s(%v)", fun.FullName(), arg.Name))
 		}
 	}
 

@@ -49,12 +49,9 @@ func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 
 FunLoop:
 	for _, fun := range functions {
-		//b, _ := json.Marshal(struct{Name, Documentation string}{Name:fun.Name(), Documentation:fun.Documentation})
+		//b, _ := json.Marshal(struct{Name, Documentation string}{Name:fun.FullName(), Documentation:fun.Documentation})
 		//fmt.Println(string(b))
-		fName := fun.name
-		if fun.alias != "" {
-			fName = fun.alias
-		}
+		fName := fun.AliasedName()
 		fName = strings.ToLower(fName)
 		if err := fun.SaveProtobuf(w, seen); err != nil {
 			if SkipMissingTableOf && (errors.Is(err, ErrMissingTableOf) ||
@@ -62,7 +59,7 @@ FunLoop:
 				Log("msg", "SKIP function, missing TableOf info", "function", fName)
 				continue FunLoop
 			}
-			return errors.Errorf("%s: %w", fun.name, err)
+			return errors.Errorf("%s: %w", fun.Name, err)
 		}
 		var streamQual string
 		if fun.HasCursorOut() {
@@ -120,9 +117,9 @@ func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out b
 		args = append(args, *f.Returns)
 	}
 
-	nm := f.name
-	if f.alias != "" {
-		nm = f.alias
+	nm := f.Name
+	if f.Alias != "" {
+		nm = f.Alias
 	}
 	return protoWriteMessageTyp(dst,
 		CamelCase(dot2D.Replace(strings.ToLower(nm))+"__"+dirname),

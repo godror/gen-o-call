@@ -28,7 +28,7 @@ const (
 )
 
 type Function struct {
-	Package, name, alias string
+	Package, Name, Alias string
 	Returns              *Argument  `json:",omitempty"`
 	Args                 []Argument `json:",omitempty"`
 	Documentation        string     `json:",omitempty"`
@@ -39,10 +39,10 @@ type Function struct {
 	maxTableSize         int
 }
 
-func (f Function) Name() string {
-	nm := strings.ToLower(f.name)
-	if f.alias != "" {
-		nm = strings.ToLower(f.name)
+func (f Function) FullName() string {
+	nm := strings.ToLower(f.Name)
+	if f.Alias != "" {
+		nm = strings.ToLower(f.Name)
 	}
 	if f.Package == "" {
 		return nm
@@ -53,11 +53,17 @@ func (f Function) RealName() string {
 	if f.Replacement != nil {
 		return f.Replacement.RealName()
 	}
-	nm := strings.ToLower(f.name)
+	nm := strings.ToLower(f.Name)
 	if f.Package == "" {
 		return nm
 	}
 	return UnoCap(f.Package) + "." + nm
+}
+func (f Function) AliasedName() string {
+	if f.Alias != "" {
+		return f.Alias
+	}
+	return f.Name
 }
 
 func (f Function) String() string {
@@ -65,7 +71,7 @@ func (f Function) String() string {
 	for i := range args {
 		args[i] = f.Args[i].String()
 	}
-	s := f.Name() + "(" + strings.Join(args, ", ") + ")"
+	s := f.FullName() + "(" + strings.Join(args, ", ") + ")"
 	if f.Documentation == "" {
 		return s
 	}

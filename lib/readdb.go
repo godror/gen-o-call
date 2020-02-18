@@ -9,12 +9,12 @@ package genocall
 import (
 	"context"
 	"database/sql"
-	"sync"
 	"fmt"
 	"io"
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -208,7 +208,7 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 	}
 	funcs := make(map[string]int, len(functions))
 	for i, f := range functions {
-		funcs[f.Name()] = i
+		funcs[f.FullName()] = i
 	}
 	for _, dCh := range docPromises {
 		select {
@@ -299,14 +299,16 @@ type TypeName struct {
 	Owner, Package, Name string
 }
 type typeResolver struct {
-	mu sync.Mutex
+	mu    sync.Mutex
 	types map[TypeName]*Type
 	stmts map[string]*sql.Stmt
 }
 
-func (tr *typeResolver) Types() map[TypeName]*Type { tr.mu.Lock()
-defer tr.mu.Unlock()
-return tr.types }
+func (tr *typeResolver) Types() map[TypeName]*Type {
+	tr.mu.Lock()
+	defer tr.mu.Unlock()
+	return tr.types
+}
 
 func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
 	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]*Type)}
@@ -374,7 +376,7 @@ func (tr *typeResolver) Close() error {
 func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) error {
 	tr.mu.Lock()
 	if old := tr.types[tn]; old != nil {
-	tr.mu.Unlock()
+		tr.mu.Unlock()
 		return nil
 	}
 	typ := Type{TypeName: tn, TypeCode: data}

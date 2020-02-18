@@ -1,6 +1,7 @@
 [
     {
       "Package": "TEST_GEN_O_CALL",
+	  "Name": "simple",
       "Returns": {
         "RecordOf": null,
         "Name": "ret",
@@ -91,6 +92,7 @@
     },
     {
       "Package": "TEST_GEN_O_CALL",
+	  "Name": "rec",
       "Returns": {
         "RecordOf": null,
         "Name": "ret",
@@ -125,6 +127,7 @@
     },
     {
       "Package": "TEST_GEN_O_CALL",
+	  "Name": "tab",
       "Returns": {
         "RecordOf": null,
         "Name": "ret",
@@ -193,6 +196,7 @@
     },
     {
       "Package": "TEST_GEN_O_CALL",
+	  "Name": "REC_TAB",
       "Returns": {
         "RecordOf": null,
         "Name": "ret",
@@ -269,6 +273,7 @@
     },
     {
       "Package": "TEST_GEN_O_CALL",
+	  "Name": "REC_REC_TAB",
       "Returns": {
         "RecordOf": null,
         "Name": "ret",

@@ -239,7 +239,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types m
 		for i, ua := range uas {
 			row++
 			if i == 0 {
-				fun = Function{Package: ua.PackageName, name: ua.ObjectName, LastDDL: ua.LastDDL}
+				fun = Function{Package: ua.PackageName, Name: ua.ObjectName, LastDDL: ua.LastDDL}
 			}
 
 			level = int8(ua.DataLevel)
@@ -272,7 +272,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types m
 			parent := lastArgs[level-1]
 			if parent == nil {
 				Log("level", level, "lastArgs", lastArgs, "fun", fun)
-				panic("parent of " + fun.Name() + " is nil")
+				panic("parent of " + fun.FullName() + " is nil")
 			}
 			if parent.Flavor == FLAVOR_TABLE {
 				parent.TableOf = &arg
@@ -287,7 +287,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types m
 		}
 		//Log("args", fun.Args)
 		functions = append(functions, fun)
-		names = append(names, fun.Name())
+		names = append(names, fun.FullName())
 	}
 	Log("functions", names)
 	return
@@ -382,7 +382,7 @@ func ApplyAnnotations(functions []Function, annotations []Annotation) []Function
 				delete(funcs, nm)
 				funcs[L(a.FullOther())] = f
 				Log("rename", nm, "to", a.Other)
-				f.alias = a.Other
+				f.Alias = a.Other
 			}
 		case "replace", "replace_json":
 			k, v := L(a.FullName()), L(a.FullOther())
@@ -391,8 +391,8 @@ func ApplyAnnotations(functions []Function, annotations []Annotation) []Function
 				f.Replacement = funcs[v]
 				f.ReplacementIsJSON = a.Type == "replace_json"
 				delete(funcs, v)
-				Log("delete", v, "add", f.Name())
-				funcs[L(f.Name())] = f
+				Log("delete", v, "add", f.FullName())
+				funcs[L(f.FullName())] = f
 			}
 
 		// add handler to ALL functions in the same package
@@ -400,10 +400,10 @@ func ApplyAnnotations(functions []Function, annotations []Annotation) []Function
 			exc := strings.ToUpper(a.Name)
 			for _, f := range funcs {
 				if strings.EqualFold(f.Package, a.Package) {
-					//Log("HANDLE", nm, "of", f.Name(), "pkg", f.Package)
+					//Log("HANDLE", nm, "of", f.FullName(), "pkg", f.Package)
 					f.handle = append(f.handle, exc)
 					//} else {
-					//Log("SKIP", f.Name(), "pkg", f.Package, "a", a.Package, "nm", nm)
+					//Log("SKIP", f.FullName(), "pkg", f.Package, "a", a.Package, "nm", nm)
 				}
 			}
 

@@ -60,7 +60,8 @@ func TestJSON(t *testing.T) {
 
 		for i := range funcs {
 			f := funcs[i]
-			t.Run(f.Name(), func(t *testing.T) {
+			t.Logf("%+v", f)
+			t.Run(f.FullName(), func(t *testing.T) {
 				var buf bytes.Buffer
 				if err = SaveFunctions(&buf, []Function{f}, f.Package, "test", true); err != nil {
 					t.Error(err)
