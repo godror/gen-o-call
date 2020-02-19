@@ -240,9 +240,7 @@ func NewArgument(name, dataType, plsTypeName, typeName, dirName string, dir dire
 		AbsType: dataType,
 	}
 	if arg.PlsType.Name == "" {
-		if typ == nil {
-			panic(fmt.Sprintf("empty PLS type of %#v, typ=%#v", arg, typ))
-		}
+		panic(fmt.Sprintf("empty PLS type of %#v, typ=%#v", arg, typ))
 	}
 	switch arg.Type {
 	case "PL/SQL RECORD":
