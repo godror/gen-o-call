@@ -174,7 +174,7 @@ type Argument struct {
 	Charlength     uint
 	TableOf        *Argument // this argument is a table (array) of this type
 	goTypeName     string
-	PlsType
+	*PlsType
 	Flavor    flavor
 	Direction direction
 	Precision uint8
@@ -204,8 +204,8 @@ func (a Argument) IsOutput() bool {
 	return a.Direction&DIR_OUT > 0
 }
 
-func NewArgument(name, dataType, plsType, typeName, dirName string, dir direction,
-	charset string, precision, scale uint8, charlength uint, typ *Type) Argument {
+func NewArgument(name, dataType, plsTypeName, typeName, dirName string, dir direction,
+	charset string, precision, scale uint8, charlength uint, typ *PlsType) Argument {
 
 	name = strings.ToLower(name)
 	if typeName == "..@" {
@@ -229,14 +229,17 @@ func NewArgument(name, dataType, plsType, typeName, dirName string, dir directio
 		dir = DIR_IN
 	}
 
-	arg := Argument{Name: name, Type: dataType, PlsType: NewPlsType(plsType),
+	if typ == nil {
+		typ = &PlsType{TypeName: TypeName{Name: plsTypeName}}
+	}
+	arg := Argument{Name: name, Type: dataType, PlsType: typ,
 		TypeName: typeName, Direction: dir,
 		Precision: precision, Scale: scale, Charlength: charlength,
 		Charset: charset,
 		mu:      new(sync.Mutex),
 		AbsType: dataType,
 	}
-	if arg.ora == "" {
+	if arg.PlsType.Name == "" {
 		if typ == nil {
 			panic(fmt.Sprintf("empty PLS type of %#v, typ=%#v", arg, typ))
 		}
@@ -247,6 +250,7 @@ func NewArgument(name, dataType, plsType, typeName, dirName string, dir directio
 		arg.RecordOf = make([]NamedArgument, 0, 1)
 	case "TABLE", "PL/SQL TABLE", "REF CURSOR":
 		arg.Flavor = FLAVOR_TABLE
+		arg.TableOf = &Argument{PlsType: typ.CollectionOf}
 	}
 
 	switch arg.Type {

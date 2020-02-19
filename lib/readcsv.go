@@ -13,6 +13,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"strconv"
 	"strings"
@@ -211,7 +212,8 @@ func ReadCsv(r io.Reader) (userArgs []UserArgument, err error) {
 	return userArgs, err
 }
 
-func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types map[TypeName]*Type) (functions []Function, err error) {
+func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types map[TypeName]*PlsType) (functions []Function, err error) {
+	log.Println("ParseArguments", "types", types)
 	// Split args by functions
 	var dumpBuf strings.Builder
 	dumpEnc := xml.NewEncoder(&dumpBuf)
@@ -255,6 +257,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types m
 				ua.CharLength,
 				types[TypeName{Owner: ua.TypeOwner, Package: ua.TypeName, Name: ua.TypeSubname}],
 			)
+			log.Println(arg)
 			//Log("level", level, "arg", arg.Name, "type", ua.DataType, "last", lastArgs, "flavor", arg.Flavor)
 			// Possibilities:
 			// 1. SIMPLE

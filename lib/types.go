@@ -7,6 +7,7 @@ Copyright 2017 Tamás Gulácsi
 package genocall
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
@@ -15,28 +16,42 @@ import (
 )
 
 type PlsType struct {
-	ora string
+	TypeName
+	Attr                       string
+	Charset, IndexBy, TypeCode string
+	Length, Prec, Scale        sql.NullInt64
+	CollectionOf               *PlsType
+	RecordOf                   []*PlsType
 }
 
-func (arg PlsType) String() string { return arg.ora }
-
-// NewArg returns a new argument to ease arument conversions.
-func NewPlsType(ora string) PlsType {
-	return PlsType{ora: ora}
+type TypeName struct {
+	Owner, Package, Name string
 }
+
+func (tn TypeName) String() string {
+	if tn.Package == "" {
+		return tn.Name
+	}
+	if tn.Owner == "" {
+		return tn.Package + "." + tn.Name
+	}
+	return tn.Owner + "." + tn.Package + "." + tn.Name
+}
+
+func (arg PlsType) String() string { return arg.TypeName.String() }
 
 // FromOra retrieves the value of the argument with arg type, from src variable to dst variable.
 func (arg PlsType) FromOra(dst, src, varName string) string {
 	if Gogo {
 		if varName != "" {
-			switch arg.ora {
+			switch arg.Name {
 			case "DATE", "TIMESTAMP":
 				return fmt.Sprintf("%s = &custom.DateTime{Time:%s}", dst, varName)
 				//return fmt.Sprintf("%s = &custom.DateTime{Time:%s}", dst, varName)
 			}
 		}
 	}
-	switch arg.ora {
+	switch arg.Name {
 	case "BLOB":
 		if varName != "" {
 			return fmt.Sprintf("{ if %s.Reader != nil { %s, err = ioutil.ReadAll(%s) }", varName, dst, varName)
@@ -56,12 +71,12 @@ func (arg PlsType) FromOra(dst, src, varName string) string {
 	case "":
 		panic(fmt.Sprintf("empty \"ora\" type: %#v", arg))
 	}
-	return fmt.Sprintf("%s = %s // %s fromOra", dst, src, arg.ora)
+	return fmt.Sprintf("%s = %s // %s fromOra", dst, src, arg.Name)
 }
 
 func (arg PlsType) GetOra(src, varName string) string {
 	if Gogo {
-		switch arg.ora {
+		switch arg.Name {
 		case "DATE":
 			if varName != "" {
 				return fmt.Sprintf("%s.Format(time.RFC3339)", varName)
@@ -69,7 +84,7 @@ func (arg PlsType) GetOra(src, varName string) string {
 			return fmt.Sprintf("custom.AsDate(%s)", src)
 		}
 	}
-	switch arg.ora {
+	switch arg.Name {
 	case "NUMBER":
 		if varName != "" {
 			//return fmt.Sprintf("string(%s.(godror.Number))", varName)
@@ -89,7 +104,7 @@ func (arg PlsType) ToOra(dst, src string, dir direction) (expr string, variable 
 		inTrue = ",In:true"
 	}
 	if Gogo {
-		switch arg.ora {
+		switch arg.Name {
 		case "DATE":
 			np := strings.TrimPrefix(src, "&")
 			if dir.IsOutput() {
@@ -106,7 +121,7 @@ func (arg PlsType) ToOra(dst, src string, dir direction) (expr string, variable 
 			return fmt.Sprintf(`%s = custom.AsDate(%s).Time // toOra D`, dst, np), ""
 		}
 	}
-	switch arg.ora {
+	switch arg.Name {
 	case "PLS_INTEGER":
 		if src[0] != '&' {
 			return fmt.Sprintf("var %s sql.NullInt64; if %s != 0 { %s.Int64, %s.Valid = int64(%s), true }; %s = int32(%s.Int64)", dstVar, src, dstVar, dstVar, src, dst, dstVar), dstVar
@@ -122,13 +137,13 @@ func (arg PlsType) ToOra(dst, src string, dir direction) (expr string, variable 
 		return fmt.Sprintf("%s := godror.Lob{IsClob:true,Reader:strings.NewReader(%s)}; %s = %s", dstVar, src, dst, dstVar), dstVar
 	}
 	if dir.IsOutput() && !(strings.HasSuffix(dst, "]") && !strings.HasPrefix(dst, "params[")) {
-		if arg.ora == "NUMBER" {
+		if arg.Name == "NUMBER" {
 			return fmt.Sprintf("%s = sql.Out{Dest:(*godror.Number)(unsafe.Pointer(%s))%s} // NUMBER",
 				dst, src, inTrue), ""
 		}
-		return fmt.Sprintf("%s = sql.Out{Dest:%s%s} // %s", dst, src, inTrue, arg.ora), ""
+		return fmt.Sprintf("%s = sql.Out{Dest:%s%s} // %s", dst, src, inTrue, arg.Name), ""
 	}
-	return fmt.Sprintf("%s = %s // %s", dst, src, arg.ora), ""
+	return fmt.Sprintf("%s = %s // %s", dst, src, arg.Name), ""
 }
 
 func mkVarName(dst string) string {

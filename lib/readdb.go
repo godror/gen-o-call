@@ -11,6 +11,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -20,6 +21,8 @@ import (
 	"golang.org/x/sync/errgroup"
 	errors "golang.org/x/xerrors"
 )
+
+var _ log.Logger
 
 type dbRow struct {
 	Owner, Package, Object, InOut string
@@ -286,32 +289,20 @@ func getSource(ctx context.Context, w io.Writer, cx querier, packageName string)
 
 var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
-type Type struct {
-	TypeName
-	Attr                       string
-	Charset, IndexBy, TypeCode string
-	Length, Prec, Scale        sql.NullInt64
-	CollectionOf               *Type
-	RecordOf                   []*Type
-}
-
-type TypeName struct {
-	Owner, Package, Name string
-}
 type typeResolver struct {
 	mu    sync.Mutex
-	types map[TypeName]*Type
+	types map[TypeName]*PlsType
 	stmts map[string]*sql.Stmt
 }
 
-func (tr *typeResolver) Types() map[TypeName]*Type {
+func (tr *typeResolver) Types() map[TypeName]*PlsType {
 	tr.mu.Lock()
 	defer tr.mu.Unlock()
 	return tr.types
 }
 
 func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
-	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]*Type)}
+	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]*PlsType)}
 	for nm, qry := range map[string]string{
 		"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
 			   length, precision, scale, character_set_name, index_by,
@@ -379,7 +370,7 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 		tr.mu.Unlock()
 		return nil
 	}
-	typ := Type{TypeName: tn, TypeCode: data}
+	typ := PlsType{TypeName: tn, TypeCode: data}
 	tr.types[typ.TypeName] = &typ
 	tr.mu.Unlock()
 
@@ -387,7 +378,7 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 	var err error
 	switch data {
 	case "PL/SQL TABLE", "PL/SQL INDEX TABLE", "TABLE":
-		var elem Type
+		var elem PlsType
 		if err = tr.stmts["coll"].QueryRowContext(ctx,
 			sql.Named("owner", tn.Owner), sql.Named("pkg", tn.Package), sql.Named("sub", tn.Name),
 		).Scan(
@@ -448,7 +439,7 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var t Type
+			var t PlsType
 			if err = rows.Scan(&t.Attr, &t.Owner, &t.Name, &t.Package,
 				&t.Length, &t.Prec, &t.Scale, &t.Charset, &t.TypeCode,
 			); err != nil {
