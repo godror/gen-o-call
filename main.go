@@ -173,7 +173,7 @@ func Main(args []string) error {
 		}
 		Log("annotations", annotations)
 		functions = genocall.ApplyAnnotations(functions, annotations)
-		sort.Slice(functions, func(i, j int) bool { return functions[i].Name() < functions[j].Name() })
+		sort.Slice(functions, func(i, j int) bool { return functions[i].FullName() < functions[j].FullName() })
 
 		if *flagTestOut {
 			enc := json.NewEncoder(os.Stdout)
