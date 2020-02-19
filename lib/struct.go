@@ -229,8 +229,14 @@ func NewArgument(name, dataType, plsTypeName, typeName, dirName string, dir dire
 		dir = DIR_IN
 	}
 
-	if typ == nil {
-		typ = PlsType{TypeName: TypeName{Name: plsTypeName}}
+	if typ == nil || typ.TypeName.Name == "" {
+		typ = &PlsType{TypeName: TypeName{Name: plsTypeName}}
+		if plsTypeName == "" {
+			typ.TypeName.Name = typeName
+		}
+		if typeName == "" {
+			typ.TypeName.Name = dataType
+		}
 	}
 	arg := Argument{Name: name, Type: dataType, PlsType: *typ,
 		TypeName: typeName, Direction: dir,
@@ -248,7 +254,10 @@ func NewArgument(name, dataType, plsTypeName, typeName, dirName string, dir dire
 		arg.RecordOf = make([]NamedArgument, 0, 1)
 	case "TABLE", "PL/SQL TABLE", "REF CURSOR":
 		arg.Flavor = FLAVOR_TABLE
-		arg.TableOf = &Argument{PlsType: typ.CollectionOf}
+		if typ.CollectionOf == nil {
+			panic(fmt.Sprintf("empty CollectionOf type of %#v, typ=%#v", arg, typ))
+		}
+		arg.TableOf = &Argument{PlsType: *typ.CollectionOf}
 	}
 
 	switch arg.Type {

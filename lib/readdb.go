@@ -194,6 +194,9 @@ func ReadDB(ctx context.Context, db querier, pattern string, filter func(string)
 			err = grpErr
 		}
 	}
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, aCh := range annotPromises {
 		select {
 		case <-ctx.Done():
@@ -290,9 +293,9 @@ func getSource(ctx context.Context, w io.Writer, cx querier, packageName string)
 var rAnnotation = regexp.MustCompile(`--(oracall|gen-?o-?call):(?:(replace(_json)?|rename)\s+[a-zA-Z0-9_#]+\s*=>\s*[a-zA-Z0-9_#]+|(handle|private)\s+[a-zA-Z0-9_#]+|max-table-size\s+[a-zA-Z0-9_$]+\s*=\s*[0-9]+)`)
 
 type typeResolver struct {
+	db    querier
 	mu    sync.Mutex
 	types map[TypeName]*PlsType
-	stmts map[string]*sql.Stmt
 }
 
 func (tr *typeResolver) Types() map[TypeName]*PlsType {
@@ -301,10 +304,8 @@ func (tr *typeResolver) Types() map[TypeName]*PlsType {
 	return tr.types
 }
 
-func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
-	tr := typeResolver{stmts: make(map[string]*sql.Stmt, 4), types: make(map[TypeName]*PlsType)}
-	for nm, qry := range map[string]string{
-		"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
+var trQueries = map[string]string{
+	"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
 			   length, precision, scale, character_set_name, index_by,
 			   (SELECT MIN(typecode) FROM all_plsql_types B
 				  WHERE B.owner = A.elem_type_owner AND
@@ -326,7 +327,7 @@ func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
 			  FROM user_synonyms
 			  WHERE synonym_name = :pkg)`,
 
-		"plsTyp": `SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
+	"plsTyp": `SELECT attr_name, attr_type_owner, attr_type_name, attr_type_package,
 		  length, precision, scale, character_set_name,
 		  (SELECT MIN(typecode) FROM all_plsql_types B
 			 WHERE B.owner = A.attr_type_owner AND B.type_name = A.attr_type_name AND B.package_name = A.attr_type_package) typecode
@@ -334,34 +335,19 @@ func newTypeResolver(ctx context.Context, tx querier) (*typeResolver, error) {
 	 WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
 	 ORDER BY attr_no`,
 
-		"objTyp": `SELECT B.attr_name, B.ATTR_TYPE_NAME, B.PRECISION, B.scale, B.character_set_name,
+	"objTyp": `SELECT B.attr_name, B.ATTR_TYPE_NAME, B.PRECISION, B.scale, B.character_set_name,
             NVL2(B.ATTR_TYPE_OWNER, B.attr_type_owner||'.', '')||B.attr_type_name, B.length
        FROM all_type_attrs B
 	   WHERE B.owner = :owner AND B.type_name = :sub`,
-	} {
-		var err error
-		if tr.stmts[nm], err = tx.PrepareContext(ctx, qry); err != nil {
-			tr.Close()
-			return nil, errors.Errorf("%s: %w", qry, err)
-		}
-	}
+}
+
+func newTypeResolver(ctx context.Context, db querier) (*typeResolver, error) {
+	tr := typeResolver{db: db, types: make(map[TypeName]*PlsType)}
 	return &tr, nil
 }
 
 func (tr *typeResolver) Close() error {
-	tr.mu.Lock()
-	defer tr.mu.Unlock()
-	var firstErr error
-	stmts := tr.stmts
-	tr.stmts = nil
-	for _, stmt := range stmts {
-		if stmt != nil {
-			if err := stmt.Close(); err != nil && firstErr == nil {
-				firstErr = err
-			}
-		}
-	}
-	return firstErr
+	return nil
 }
 
 func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) error {
@@ -379,39 +365,16 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 	switch data {
 	case "PL/SQL TABLE", "PL/SQL INDEX TABLE", "TABLE":
 		var elem PlsType
-		if err = tr.stmts["coll"].QueryRowContext(ctx,
+		if err = tr.db.QueryRowContext(ctx, trQueries["coll"],
 			sql.Named("owner", tn.Owner), sql.Named("pkg", tn.Package), sql.Named("sub", tn.Name),
 		).Scan(
-			/*
-				"coll": `SELECT coll_type, elem_type_owner, elem_type_name, elem_type_package,
-					   length, precision, scale, character_set_name, index_by,
-					   (SELECT MIN(typecode) FROM all_plsql_types B
-						  WHERE B.owner = A.elem_type_owner AND
-								B.type_name = A.elem_type_name AND
-								B.package_name = A.elem_type_package) typecode
-				  FROM all_plsql_coll_types A
-				  WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
-				UNION
-				SELECT coll_type, elem_type_owner, elem_type_name, NULL elem_type_package,
-					   length, precision, scale, character_set_name, NULL index_by,
-					   (SELECT MIN(typecode) FROM all_types B
-						  WHERE B.owner = A.elem_type_owner AND
-								B.type_name = A.elem_type_name) typecode
-				  FROM all_coll_types A
-				  WHERE (owner, type_name) IN (
-					SELECT :owner, :pkg FROM DUAL
-					UNION
-					SELECT table_owner, table_name||NVL2(db_link, '@'||db_link, NULL)
-					  FROM user_synonyms
-					  WHERE synonym_name = :pkg)`,
-			*/
 			&typ.TypeCode,
 			&elem.Owner, &elem.Name, &elem.Package,
 			&elem.Length, &elem.Prec, &elem.Scale,
 			&elem.Charset, &elem.IndexBy,
 			&elem.TypeCode,
 		); err != nil {
-			return err
+			return errors.Errorf("%s, %s: %w", trQueries["coll"], tn, err)
 		}
 		tr.mu.Lock()
 		if old := tr.types[elem.TypeName]; old != nil {
@@ -432,10 +395,10 @@ func (tr *typeResolver) Resolve(ctx context.Context, data string, tn TypeName) e
 			 WHERE owner = :owner AND package_name = :pkg AND type_name = :sub
 			 ORDER BY attr_no`,
 		*/
-		if rows, err = tr.stmts["plsTyp"].QueryContext(ctx,
+		if rows, err = tr.db.QueryContext(ctx, trQueries["plsTyp"],
 			sql.Named("owner", tn.Owner), sql.Named("pkg", tn.Package), sql.Named("sub", tn.Name),
 		); err != nil {
-			return err
+			return errors.Errorf("%s: %w", trQueries["plsTyp"], err)
 		}
 		defer rows.Close()
 		for rows.Next() {
