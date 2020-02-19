@@ -174,7 +174,7 @@ type Argument struct {
 	Charlength     uint
 	TableOf        *Argument // this argument is a table (array) of this type
 	goTypeName     string
-	*PlsType
+	PlsType
 	Flavor    flavor
 	Direction direction
 	Precision uint8
@@ -230,9 +230,9 @@ func NewArgument(name, dataType, plsTypeName, typeName, dirName string, dir dire
 	}
 
 	if typ == nil {
-		typ = &PlsType{TypeName: TypeName{Name: plsTypeName}}
+		typ = PlsType{TypeName: TypeName{Name: plsTypeName}}
 	}
-	arg := Argument{Name: name, Type: dataType, PlsType: typ,
+	arg := Argument{Name: name, Type: dataType, PlsType: *typ,
 		TypeName: typeName, Direction: dir,
 		Precision: precision, Scale: scale, Charlength: charlength,
 		Charset: charset,
