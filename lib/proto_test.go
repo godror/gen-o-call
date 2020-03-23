@@ -7,10 +7,24 @@ Copyright 2019 Tamás Gulácsi
 package genocall
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 )
+
+func TestJSONSaveProto(t *testing.T) {
+	funcs := readJSONFuncs(nil, t)
+
+	var buf bytes.Buffer
+	seen := make(map[string]struct{})
+	for _, fun := range funcs {
+		buf.Reset()
+		if err := fun.SaveProtobuf(&buf, seen); err != nil {
+			t.Error(err)
+		}
+	}
+}
 
 func TestParseArgDocs(t *testing.T) {
 	for _, tC := range []struct {

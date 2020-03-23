@@ -17,7 +17,6 @@ limitations under the License.
 package genocall
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io/ioutil"
@@ -32,7 +31,7 @@ import (
 	"github.com/kylelemons/godebug/diff"
 )
 
-func TestJSON(t *testing.T) {
+func readJSONFuncs(funcs []Function, t *testing.T) []Function {
 	fis, err := ioutil.ReadDir("testdata")
 	if len(fis) == 0 {
 		if err == nil {
@@ -40,6 +39,7 @@ func TestJSON(t *testing.T) {
 		}
 		t.Fatal(err)
 	}
+	var fs []Function
 	for _, fi := range fis {
 		if !(fi.Mode().IsRegular() && strings.HasSuffix(fi.Name(), ".json")) {
 			continue
@@ -50,25 +50,15 @@ func TestJSON(t *testing.T) {
 			t.Error(err)
 			continue
 		}
-		var funcs []Function
-		err = json.NewDecoder(fh).Decode(&funcs)
+		fs = fs[:0]
+		err = json.NewDecoder(fh).Decode(&fs)
 		fh.Close()
 		if err != nil {
 			t.Error(err)
 		}
-		t.Log(funcs)
-
-		for i := range funcs {
-			f := funcs[i]
-			t.Logf("%+v", f)
-			t.Run(f.FullName(), func(t *testing.T) {
-				var buf bytes.Buffer
-				if err = SaveFunctions(&buf, []Function{f}, f.Package, "test", true); err != nil {
-					t.Error(err)
-				}
-			})
-		}
+		funcs = append(funcs, fs...)
 	}
+	return funcs
 }
 
 func TestParseDocs(t *testing.T) {
