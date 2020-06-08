@@ -24,11 +24,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 	"unicode"
 
@@ -50,11 +52,11 @@ import (
 
 var logger = kitloghlp.New(os.Stderr)
 
-var flagConnect = flag.String("connect", "", "connect to DB for retrieving function arguments")
+var flagConnect *string
 
 func main() {
 	genocall.Log = log.With(logger, "lib", "genocall").Log
-	if err := Main(os.Args); err != nil {
+	if err := Main(os.Args[1:]); err != nil {
 		logger.Log("error", fmt.Sprintf("%+v", err))
 		os.Exit(1)
 	}
@@ -65,21 +67,25 @@ func Main(args []string) error {
 
 	gopSrc := filepath.Join(os.Getenv("GOPATH"), "src")
 
-	flag.BoolVar(&genocall.SkipMissingTableOf, "skip-missing-table-of", true, "skip functions with missing TableOf info")
-	flagBaseDir := flag.String("base-dir", gopSrc, "base dir for the -pb-out, -db-out flags")
-	flagPbOut := flag.String("pb-out", "", "package import path for the Protocol Buffers files, optionally with the package name, like \"my/pb-pkg:main\"")
-	flagDbOut := flag.String("db-out", "-:main", "package name of the generated functions, optionally with the package name, like \"my/db-pkg:main\"")
-	flagGenerator := flag.String("protoc-gen", "gogofast", "use protoc-gen-<generator>")
-	flag.BoolVar(&genocall.NumberAsString, "number-as-string", false, "add ,string to json tags")
-	flag.BoolVar(&custom.ZeroIsAlmostZero, "zero-is-almost-zero", false, "zero should be just almost zero, to distinguish 0 and non-set field")
-	flagVerbose := flag.Bool("v", false, "verbose logging")
-	flagExcept := flag.String("except", "", "except these functions")
-	flagReplace := flag.String("replace", "", "funcA=>funcB")
-	flagTestOut := flag.Bool("test-out", false, "output test data")
-	flagJsonIn := flag.String("json", "", "JSON input data")
-	flag.IntVar(&genocall.MaxTableSize, "max-table-size", genocall.MaxTableSize, "maximum table size for PL/SQL associative arrays")
+	fs := flag.NewFlagSet("gen-o-call", flag.ContinueOnError)
+	flagConnect = fs.String("connect", "", "connect to DB for retrieving function arguments")
+	fs.BoolVar(&genocall.SkipMissingTableOf, "skip-missing-table-of", true, "skip functions with missing TableOf info")
+	flagBaseDir := fs.String("base-dir", gopSrc, "base dir for the -pb-out, -db-out flags")
+	flagPbOut := fs.String("pb-out", "", "package import path for the Protocol Buffers files, optionally with the package name, like \"my/pb-pkg:main\"")
+	flagDbOut := fs.String("db-out", "-:main", "package name of the generated functions, optionally with the package name, like \"my/db-pkg:main\"")
+	flagGenerator := fs.String("protoc-gen", "gogofast", "use protoc-gen-<generator>")
+	fs.BoolVar(&genocall.NumberAsString, "number-as-string", false, "add ,string to json tags")
+	fs.BoolVar(&custom.ZeroIsAlmostZero, "zero-is-almost-zero", false, "zero should be just almost zero, to distinguish 0 and non-set field")
+	flagVerbose := fs.Bool("v", false, "verbose logging")
+	flagExcept := fs.String("except", "", "except these functions")
+	flagReplace := fs.String("replace", "", "funcA=>funcB")
+	flagTestOut := fs.Bool("test-out", false, "output test data")
+	flagJsonIn := fs.String("json", "", "JSON input data")
+	fs.IntVar(&genocall.MaxTableSize, "max-table-size", genocall.MaxTableSize, "maximum table size for PL/SQL associative arrays")
 
-	flag.Parse()
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 	if *flagPbOut == "" {
 		if *flagDbOut == "" {
 			return errors.New("-pb-out or -db-out is required!")
@@ -92,13 +98,15 @@ func Main(args []string) error {
 	dbPath, dbPkg := parsePkgFlag(*flagDbOut)
 
 	Log := logger.Log
-	pattern := flag.Arg(0)
+	pattern := fs.Arg(0)
 	if pattern == "" {
 		pattern = "%"
 	}
 	genocall.Gogo = *flagGenerator != "go"
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := globalCtx(context.Background())
+	defer cancel()
+	ctx, cancel = context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
 	var err error
@@ -154,7 +162,7 @@ func Main(args []string) error {
 		var annotations []genocall.Annotation
 		functions, annotations, err = genocall.ReadDB(ctx, tx, pattern, filter)
 		if err != nil {
-			return errors.Errorf("read %s: %w", flag.Arg(0), err)
+			return errors.Errorf("read %s: %w", fs.Arg(0), err)
 		}
 		*flagReplace = strings.TrimSpace(*flagReplace)
 		for _, elt := range strings.FieldsFunc(
@@ -292,6 +300,19 @@ func parsePkgFlag(s string) (string, string) {
 		pkg = "main"
 	}
 	return s, pkg
+}
+
+func globalCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	var cancel context.CancelFunc
+	ctx, cancel = context.WithCancel(ctx)
+	go func() {
+		<-sigCh
+		signal.Stop(sigCh)
+		cancel()
+	}()
+	return ctx, cancel
 }
 
 // vim: set fileencoding=utf-8 noet:

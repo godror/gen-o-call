@@ -1,5 +1,5 @@
 /*
-Copyright 2017 Tamás Gulácsi
+Copyright 2017, 2020 Tamás Gulácsi
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package main
+package main_test
 
 import (
 	"bytes"
@@ -40,9 +40,12 @@ import (
 var (
 	finish = false
 	TOff   = time.UTC
+
+	flagConnect = flag.String("connect", "", "db to connect to")
 )
 
 func init() {
+	testing.Init()
 	flag.Parse()
 
 	os.Setenv("NLS_LANG", "american_america.AL32UTF8")
@@ -559,6 +562,8 @@ var (
 )
 
 func runTest(t *testing.T, prog string, args ...string) string {
+	fmt.Printf("%q %q\n", prog, args)
+	t.Logf("%q %q", prog, args)
 	c := exec.Command(prog, args...)
 	if nlsEnv == nil {
 		nlsEnv = make([]string, 0, len(os.Environ())+2)
@@ -575,12 +580,11 @@ func runTest(t *testing.T, prog string, args ...string) string {
 	errBuf.Reset()
 	c.Stderr = errBuf
 	out, err := c.Output()
+	t.Logf("%q %s:\n%s\n%s", prog, args, out, errBuf)
 	if err != nil {
-		t.Errorf("ERROR '%q %s': %v\n%s", prog, args, err, errBuf)
+		t.Error(err)
 		finish = true
 		t.FailNow()
-	} else {
-		t.Logf("%q %s:\n%s\n%s", prog, args, out, errBuf)
 	}
 	return string(out)
 }
