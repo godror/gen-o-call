@@ -10,10 +10,16 @@ import (
 	"time"
 
 	_ "github.com/godror/godror"
-	"github.com/kr/pretty"
+	"github.com/kortschak/utter"
 )
 
 var flagConnect = flag.String("connect", os.Getenv("BRUNO_ID"), "DB to connect to")
+var dump = utter.NewDefaultConfig()
+
+func init() {
+	dump.IgnoreUnexported = true
+	dump.OmitZero = true
+}
 
 func TestReadDB(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -63,7 +69,7 @@ END;`,
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log("funcs", pretty.Sprint(funcs))
+	t.Log("funcs", dump.Sdump(funcs))
 }
 
 func TestParseCSV(t *testing.T) {

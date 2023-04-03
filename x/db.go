@@ -65,7 +65,7 @@ func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 		type_owner, type_name, type_subname, type_link,
 		type_object_type, pls_type
 	  FROM all_arguments 
-	  WHERE owner = NVL(SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA'), :1) AND 
+	  WHERE owner = NVL(:1, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')) AND 
 	        package_name = UPPER(:2)
 	  ORDER BY object_id, subprogram_id, sequence`
 	rows, err := db.QueryContext(ctx, qry, owner, pkg)
@@ -127,7 +127,9 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 			return nil
 		}
 	}
-	const qry = `select typecode, attributes FROM all_plsql_types where   owner = :1 AND package_name = :2 AND type_name = :3`
+	const qry = `SELECT typecode, attributes 
+		FROM all_plsql_types 
+		WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3`
 	var typ string
 	var n int32
 	if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
@@ -141,7 +143,7 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 			attr_type_owner, attr_type_package, attr_type_name, 
 			length, precision, scale
 		FROM all_plsql_type_attrs
-		WHERE owner = :1 AND package_name = :2 AND type_name = :3
+		WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3
 		ORDER BY attr_no`
 		rows, err := db.QueryContext(ctx, qry, obj.Owner, obj.Package, obj.Name)
 		if err != nil {
@@ -168,7 +170,7 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 		elem_type_owner, elem_type_package, elem_type_name, 
 		length, precision, scale, index_by 
 	FROM all_plsql_coll_types
-	WHERE owner = :1 AND package_name = :2 AND type_name = :3`
+	WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3`
 		var elem ObjectOrScalar
 		if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
 			&typ,
