@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 )
 
 type Direction uint8
@@ -52,7 +53,8 @@ type Triplet struct {
 
 type DB struct {
 	*sql.DB
-	types map[Triplet]*Object
+	mu       sync.Mutex
+	objCache map[Triplet]*Object
 }
 
 func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
@@ -116,11 +118,16 @@ func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 	return funcs, rows.Err()
 }
 func (obj *Object) InitObject(ctx context.Context, db *DB) error {
-	if c := db.types[obj.Triplet]; c != nil {
-		*obj = *c
-		return nil
+	db.mu.Lock()
+	{
+		c := db.objCache[obj.Triplet]
+		db.mu.Unlock()
+		if c != nil {
+			*obj = *c
+			return nil
+		}
 	}
-	const qry = `SELECT typecode, attributes FROM all_plsql_types where   owner = :1 AND package_name = :2 AND type_name = :3`
+	const qry = `select typecode, attributes FROM all_plsql_types where   owner = :1 AND package_name = :2 AND type_name = :3`
 	var typ string
 	var n int32
 	if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
@@ -160,7 +167,7 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 		const qry = `SELECT coll_type, 
 		elem_type_owner, elem_type_package, elem_type_name, 
 		length, precision, scale, index_by 
-	FROM all_plsql_coll_types 
+	FROM all_plsql_coll_types
 	WHERE owner = :1 AND package_name = :2 AND type_name = :3`
 		var elem ObjectOrScalar
 		if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
@@ -177,10 +184,12 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 		}
 		obj.CollectionOf = &elem
 	}
-	if db.types == nil {
-		db.types = make(map[Triplet]*Object)
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.objCache == nil {
+		db.objCache = make(map[Triplet]*Object)
 	}
-	db.types[obj.Triplet] = obj
+	db.objCache[obj.Triplet] = obj
 	return nil
 }
 func splitOwner(name string) (string, string) {
