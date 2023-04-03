@@ -10,6 +10,7 @@ import (
 	"time"
 
 	_ "github.com/godror/godror"
+	"github.com/kr/pretty"
 )
 
 var flagConnect = flag.String("connect", os.Getenv("BRUNO_ID"), "DB to connect to")
@@ -58,11 +59,11 @@ END;`,
 		}
 	}
 
-	funcs, err := ReadPackage(ctx, db, "GT_gen_o_call")
+	funcs, err := ReadPackage(ctx, &DB{DB: db}, "GT_gen_o_call")
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log("funcs:", funcs)
+	t.Log("funcs", pretty.Sprint(funcs))
 }
 
 func TestParseCSV(t *testing.T) {

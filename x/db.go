@@ -15,20 +15,47 @@ const (
 	DirInOut = Direction(2)
 )
 
+type Attribute struct {
+	Name string
+	Type ObjectOrScalar
+}
 type Argument struct {
-	Name                                       string
-	DataType                                   string
-	TypeOwner, TypeName, TypeSubname, TypeLink string
-	TypeObjectType, PlsType                    string
-	Length, Precision, Scale                   sql.NullInt32
-	InOut                                      Direction
+	Attribute
+	InOut Direction
 }
 type Function struct {
-	Owner, Package, Name string
-	Args                 []Argument
+	Triplet
+	Args []Argument
 }
 
-func ReadPackage(ctx context.Context, db *sql.DB, pkg string) ([]Function, error) {
+type Scalar struct {
+	DataType                 string
+	Length, Precision, Scale sql.NullInt32
+}
+type Object struct {
+	CollectionOf *ObjectOrScalar
+	Triplet
+	Attributes              []Attribute
+	TypeLink                string
+	TypeObjectType, PlsType string
+	IndexBy                 string
+	IsCollection            bool
+}
+type ObjectOrScalar struct {
+	Object
+	Scalar
+	IsObject bool
+}
+type Triplet struct {
+	Owner, Package, Name string
+}
+
+type DB struct {
+	*sql.DB
+	types map[Triplet]*Object
+}
+
+func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 	owner, pkg := splitOwner(pkg)
 	const qry = `SELECT 
 	    owner, package_name, object_name, argument_name, data_type,
@@ -43,6 +70,7 @@ func ReadPackage(ctx context.Context, db *sql.DB, pkg string) ([]Function, error
 	if err != nil {
 		return nil, fmt.Errorf("%s [%q, %q]: %w", qry, owner, pkg, err)
 	}
+	defer rows.Close()
 	var funcs []Function
 	var old Function
 	for rows.Next() {
@@ -51,12 +79,17 @@ func ReadPackage(ctx context.Context, db *sql.DB, pkg string) ([]Function, error
 		var inOut string
 		if err = rows.Scan(
 			&act.Owner, &act.Package, &act.Name,
-			&arg.Name, &arg.DataType, &inOut,
-			&arg.Length, &arg.Precision, &arg.Scale,
-			&arg.TypeOwner, &arg.TypeName, &arg.TypeSubname, &arg.TypeLink,
-			&arg.TypeObjectType, &arg.PlsType,
+			&arg.Name, &arg.Type.DataType, &inOut,
+			&arg.Type.Length, &arg.Type.Precision, &arg.Type.Scale,
+			&arg.Type.Owner, &arg.Type.Package, &arg.Type.Name, &arg.Type.TypeLink,
+			&arg.Type.TypeObjectType, &arg.Type.PlsType,
 		); err != nil {
 			return funcs, fmt.Errorf("%s [%q, %q]: %w", qry, owner, pkg, err)
+		}
+		if arg.Type.IsObject = arg.Type.Owner != ""; arg.Type.IsObject {
+			if err := arg.Type.Object.InitObject(ctx, db); err != nil {
+				return funcs, err
+			}
 		}
 		switch inOut {
 		case "IN":
@@ -76,12 +109,80 @@ func ReadPackage(ctx context.Context, db *sql.DB, pkg string) ([]Function, error
 			old = act
 		}
 	}
+	rows.Close()
 	if old.Name != "" {
 		funcs = append(funcs, old)
 	}
-	return funcs, nil
+	return funcs, rows.Err()
 }
-
+func (obj *Object) InitObject(ctx context.Context, db *DB) error {
+	if c := db.types[obj.Triplet]; c != nil {
+		*obj = *c
+		return nil
+	}
+	const qry = `SELECT typecode, attributes FROM all_plsql_types where   owner = :1 AND package_name = :2 AND type_name = :3`
+	var typ string
+	var n int32
+	if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
+		&typ, &n,
+	); err != nil {
+		return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
+	}
+	if n != 0 {
+		obj.Attributes = make([]Attribute, 0, int(n))
+		const qry = `SELECT attr_name, 
+			attr_type_owner, attr_type_package, attr_type_name, 
+			length, precision, scale
+		FROM all_plsql_type_attrs
+		WHERE owner = :1 AND package_name = :2 AND type_name = :3
+		ORDER BY attr_no`
+		rows, err := db.QueryContext(ctx, qry, obj.Owner, obj.Package, obj.Name)
+		if err != nil {
+			return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var a Attribute
+			if err = rows.Scan(
+				&a.Name,
+				&a.Type.Object.Owner, &a.Type.Object.Package, &a.Type.Object.Name,
+				&a.Type.Length, &a.Type.Precision, &a.Type.Scale,
+			); err != nil {
+				return fmt.Errorf("%s [%q]: %w", qry, obj.Triplet, err)
+			}
+			obj.Attributes = append(obj.Attributes, a)
+		}
+		rows.Close()
+		if err = rows.Err(); err != nil {
+			return err
+		}
+	} else if obj.IsCollection = typ == "COLLECTION"; obj.IsCollection {
+		const qry = `SELECT coll_type, 
+		elem_type_owner, elem_type_package, elem_type_name, 
+		length, precision, scale, index_by 
+	FROM all_plsql_coll_types 
+	WHERE owner = :1 AND package_name = :2 AND type_name = :3`
+		var elem ObjectOrScalar
+		if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
+			&typ,
+			&elem.Owner, &elem.Package, &elem.Name,
+			&elem.Length, &elem.Precision, &elem.Scale, &elem.IndexBy,
+		); err != nil {
+			return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
+		}
+		if elem.IsObject = elem.Owner != ""; elem.IsObject {
+			if err := elem.InitObject(ctx, db); err != nil {
+				return err
+			}
+		}
+		obj.CollectionOf = &elem
+	}
+	if db.types == nil {
+		db.types = make(map[Triplet]*Object)
+	}
+	db.types[obj.Triplet] = obj
+	return nil
+}
 func splitOwner(name string) (string, string) {
 	if i := strings.IndexByte(name, '.'); i >= 0 {
 		return name[:i], name[i+1:]

@@ -17,6 +17,7 @@ require (
 	github.com/google/go-cmp v0.5.9
 	github.com/grpc-ecosystem/go-grpc-middleware v1.0.1-0.20190118093823-f849b5445de4
 	github.com/klauspost/cpuid v1.2.3 // indirect
+	github.com/kr/pretty v0.3.1 // indirect
 	github.com/kylelemons/godebug v1.1.0
 	github.com/oklog/ulid v1.3.1
 	github.com/peterbourgon/ff/v3 v3.0.0
