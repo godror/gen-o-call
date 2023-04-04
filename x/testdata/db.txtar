@@ -1,0 +1,54 @@
+-- SELECT typecode, attributes FROM all_plsql_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","OBJ_TT"] --
+["COLLECTION",0]
+-- SELECT coll_type, elem_type_owner, elem_type_package, elem_type_name, length, precision, scale, index_by FROM all_plsql_coll_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","OBJ_TT"] --
+["PL/SQL INDEX TABLE","BRUNO_OWNER","GT_GEN_O_CALL","OBJ_RT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"BINARY_INTEGER"]
+-- SELECT typecode, attributes FROM all_plsql_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","OBJ_RT"] --
+["PL/SQL RECORD",8]
+-- SELECT typecode, attributes FROM all_plsql_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","VC_TT"] --
+["COLLECTION",0]
+-- SELECT coll_type, elem_type_owner, elem_type_package, elem_type_name, length, precision, scale, index_by FROM all_plsql_coll_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","VC_TT"] --
+["PL/SQL INDEX TABLE","","","VARCHAR2",{"Int32":32767,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"BINARY_INTEGER"]
+-- SELECT typecode, attributes FROM all_plsql_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","REC_RT"] --
+["PL/SQL RECORD",2]
+-- SELECT attr_name, attr_type_owner, attr_type_package, attr_type_name, length, precision, scale FROM all_plsql_type_attrs WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3 ORDER BY attr_no	["BRUNO_OWNER","GT_GEN_O_CALL","REC_RT"] --
+["F_TXT","","","VARCHAR2",{"Int32":100,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_VC_TT","BRUNO_OWNER","GT_GEN_O_CALL","VC_TT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+-- SELECT attr_name, attr_type_owner, attr_type_package, attr_type_name, length, precision, scale FROM all_plsql_type_attrs WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3 ORDER BY attr_no	["BRUNO_OWNER","GT_GEN_O_CALL","REC_RT"] --
+["F_TXT","","","VARCHAR2",{"Int32":100,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_VC_TT","BRUNO_OWNER","GT_GEN_O_CALL","VC_TT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+-- SELECT typecode, attributes FROM all_plsql_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","REC_TT"] --
+["COLLECTION",0]
+-- SELECT coll_type, elem_type_owner, elem_type_package, elem_type_name, length, precision, scale, index_by FROM all_plsql_coll_types WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3	["BRUNO_OWNER","GT_GEN_O_CALL","REC_TT"] --
+["PL/SQL INDEX TABLE","BRUNO_OWNER","GT_GEN_O_CALL","REC_RT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"BINARY_INTEGER"]
+-- SELECT attr_name, attr_type_owner, attr_type_package, attr_type_name, length, precision, scale FROM all_plsql_type_attrs WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3 ORDER BY attr_no	["BRUNO_OWNER","GT_GEN_O_CALL","OBJ_RT"] --
+["F_INT","","","PL/SQL PLS INTEGER",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_DT","","","DATE",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_NUM","","","NUMBER",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_CLOB","","","CLOB",{"Int32":0,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_STR","","","VARCHAR2",{"Int32":1000,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_VC_TT","BRUNO_OWNER","GT_GEN_O_CALL","VC_TT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_REC","BRUNO_OWNER","GT_GEN_O_CALL","REC_RT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_REC_TT","BRUNO_OWNER","GT_GEN_O_CALL","REC_TT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+-- SELECT attr_name, attr_type_owner, attr_type_package, attr_type_name, length, precision, scale FROM all_plsql_type_attrs WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3 ORDER BY attr_no	["BRUNO_OWNER","GT_GEN_O_CALL","OBJ_RT"] --
+["F_INT","","","PL/SQL PLS INTEGER",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_DT","","","DATE",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_NUM","","","NUMBER",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_CLOB","","","CLOB",{"Int32":0,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_STR","","","VARCHAR2",{"Int32":1000,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_VC_TT","BRUNO_OWNER","GT_GEN_O_CALL","VC_TT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_REC","BRUNO_OWNER","GT_GEN_O_CALL","REC_RT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+["F_REC_TT","BRUNO_OWNER","GT_GEN_O_CALL","REC_TT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false}]
+-- SELECT owner, package_name, object_name, argument_name, data_type, in_out, data_length, data_precision, data_scale, type_owner, type_name, type_subname, type_link, type_object_type, pls_type FROM all_arguments WHERE owner = NVL(:1, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')) AND package_name = UPPER(:2) ORDER BY object_id, subprogram_id, sequence	["","GT_gen_o_call"] --
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","","PL/SQL TABLE","OUT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"BRUNO_OWNER","GT_GEN_O_CALL","OBJ_TT","","PACKAGE",""]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_INT","BINARY_INTEGER","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","PLS_INTEGER"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_DT","DATE","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","DATE"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_NUM","NUMBER","IN",{"Int32":22,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","NUMBER"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_CLOB","CLOB","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","CLOB"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_STR","VARCHAR2","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","VARCHAR2"]
+-- SELECT owner, package_name, object_name, argument_name, data_type, in_out, data_length, data_precision, data_scale, type_owner, type_name, type_subname, type_link, type_object_type, pls_type FROM all_arguments WHERE owner = NVL(:1, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')) AND package_name = UPPER(:2) ORDER BY object_id, subprogram_id, sequence	["","GT_gen_o_call"] --
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","","PL/SQL TABLE","OUT",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"BRUNO_OWNER","GT_GEN_O_CALL","OBJ_TT","","PACKAGE",""]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_INT","BINARY_INTEGER","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","PLS_INTEGER"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_DT","DATE","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","DATE"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_NUM","NUMBER","IN",{"Int32":22,"Valid":true},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","NUMBER"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_CLOB","CLOB","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","CLOB"]
+["BRUNO_OWNER","GT_GEN_O_CALL","FUN","P_STR","VARCHAR2","IN",{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},{"Int32":0,"Valid":false},"","","","","","VARCHAR2"]

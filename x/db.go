@@ -53,12 +53,12 @@ type Triplet struct {
 }
 
 type DB struct {
-	*sql.DB
+	DB       querier
 	objCache map[Triplet]*Object
 	mu       sync.Mutex
 }
 
-func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
+func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 	owner, pkg := splitOwner(pkg)
 	const qry = `SELECT 
 	    owner, package_name, object_name, argument_name, data_type,
@@ -69,7 +69,7 @@ func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 	  WHERE owner = NVL(:1, SYS_CONTEXT('USERENV', 'CURRENT_SCHEMA')) AND 
 	        package_name = UPPER(:2)
 	  ORDER BY object_id, subprogram_id, sequence`
-	rows, err := db.QueryContext(ctx, qry, owner, pkg)
+	rows, err := db.DB.QueryContext(ctx, qry, owner, pkg)
 	if err != nil {
 		return nil, fmt.Errorf("%s [%q, %q]: %w", qry, owner, pkg, err)
 	}
@@ -90,9 +90,11 @@ func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 			return funcs, fmt.Errorf("%s [%q, %q]: %w", qry, owner, pkg, err)
 		}
 		if arg.Type.IsObject = arg.Type.Owner != ""; arg.Type.IsObject {
-			if err := arg.Type.Object.InitObject(ctx, db); err != nil {
+			sub, err := db.ReadObject(ctx, arg.Type.Object.Triplet)
+			if err != nil {
 				return funcs, err
 			}
+			arg.Type.Object = *sub
 		}
 		switch inOut {
 		case "IN":
@@ -118,26 +120,26 @@ func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 	}
 	return funcs, rows.Err()
 }
-func (obj *Object) InitObject(ctx context.Context, db *DB) error {
-	slog.Debug("InitObject", "obj", obj.Triplet)
-	{
-		db.mu.Lock()
-		c := db.objCache[obj.Triplet]
-		db.mu.Unlock()
-		if c != nil {
-			*obj = *c
-			return nil
-		}
+func (db *DB) ReadObject(ctx context.Context, name Triplet) (*Object, error) {
+	slog.Debug("ReadObject", "obj", name)
+
+	db.mu.Lock()
+	obj := db.objCache[name]
+	db.mu.Unlock()
+	if obj != nil {
+		return obj, nil
 	}
+	obj = &Object{Triplet: name}
+
 	const qry = `SELECT typecode, attributes 
 		FROM all_plsql_types 
 		WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3`
 	var typ string
 	var n int32
-	if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
+	if err := db.DB.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
 		&typ, &n,
 	); err != nil {
-		return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
+		return nil, fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
 	}
 	slog.Debug("IsCollection", "typ", typ, "n", n)
 	if n != 0 {
@@ -148,9 +150,9 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 		FROM all_plsql_type_attrs
 		WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3
 		ORDER BY attr_no`
-		rows, err := db.QueryContext(ctx, qry, obj.Owner, obj.Package, obj.Name)
+		rows, err := db.DB.QueryContext(ctx, qry, obj.Owner, obj.Package, obj.Name)
 		if err != nil {
-			return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
+			return nil, fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
 		}
 		defer rows.Close()
 		for rows.Next() {
@@ -160,16 +162,20 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 				&a.Type.Object.Owner, &a.Type.Object.Package, &a.Type.Object.Name,
 				&a.Type.Length, &a.Type.Precision, &a.Type.Scale,
 			); err != nil {
-				return fmt.Errorf("%s [%q]: %w", qry, obj.Triplet, err)
+				return nil, fmt.Errorf("%s [%q]: %w", qry, name, err)
 			}
 			if a.Type.IsObject = a.Type.Owner != ""; a.Type.IsObject {
-				a.Type.InitObject(ctx, db)
+				sub, err := db.ReadObject(ctx, a.Type.Triplet)
+				if err != nil {
+					return nil, err
+				}
+				a.Type.Object = *sub
 			}
 			obj.Attributes = append(obj.Attributes, a)
 		}
 		rows.Close()
 		if err = rows.Err(); err != nil {
-			return err
+			return nil, err
 		}
 	} else if obj.IsCollection = typ == "COLLECTION"; obj.IsCollection {
 		const qry = `SELECT coll_type, 
@@ -178,17 +184,19 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 	FROM all_plsql_coll_types
 	WHERE owner = NVL(:1, SYS_CONTEXT('BR_CTX_G','CURRENT_SCHEMA')) AND package_name = :2 AND type_name = :3`
 		var elem ObjectOrScalar
-		if err := db.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
+		if err := db.DB.QueryRowContext(ctx, qry, obj.Owner, obj.Package, obj.Name).Scan(
 			&typ,
 			&elem.Owner, &elem.Package, &elem.Name,
 			&elem.Length, &elem.Precision, &elem.Scale, &elem.IndexBy,
 		); err != nil {
-			return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
+			return nil, fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
 		}
 		if elem.IsObject = elem.Owner != ""; elem.IsObject {
-			if err := elem.InitObject(ctx, db); err != nil {
-				return err
+			sub, err := db.ReadObject(ctx, elem.Triplet)
+			if err != nil {
+				return nil, err
 			}
+			elem.Object = *sub
 		}
 		obj.CollectionOf = &elem
 	}
@@ -198,7 +206,7 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 		db.objCache = make(map[Triplet]*Object)
 	}
 	db.objCache[obj.Triplet] = obj
-	return nil
+	return obj, nil
 }
 func splitOwner(name string) (string, string) {
 	if i := strings.IndexByte(name, '.'); i >= 0 {
@@ -206,3 +214,73 @@ func splitOwner(name string) (string, string) {
 	}
 	return "", name
 }
+
+type querier interface {
+	QueryContext(context.Context, string, ...any) (rowser, error)
+	QueryRowContext(context.Context, string, ...any) rower
+}
+type rowser interface {
+	Close() error
+	Next() bool
+	Err() error
+	Scan(...any) error
+}
+type rower interface {
+	Scan(...any) error
+}
+type SqlDB struct {
+	*sql.DB
+	LogQry func(qry string, args ...any) (next func(...any), close func())
+}
+
+func (db SqlDB) QueryContext(ctx context.Context, qry string, args ...any) (rowser, error) {
+	rows, err := db.DB.QueryContext(ctx, qry, args...)
+	if err != nil || db.LogQry == nil {
+		return nil, err
+	}
+	next, close := db.LogQry(qry, args...)
+	return sqlRows{Rows: rows, logRow: next, logClose: close}, nil
+}
+func (db SqlDB) QueryRowContext(ctx context.Context, qry string, args ...any) rower {
+	row := db.DB.QueryRowContext(ctx, qry, args...)
+	if db.LogQry == nil {
+		return row
+	}
+	next, close := db.LogQry(qry, args...)
+	return sqlRow{Row: row, logRow: next, logClose: close}
+}
+
+type sqlRows struct {
+	*sql.Rows
+	logRow   func(...any)
+	logClose func()
+}
+
+func (rows sqlRows) Scan(args ...any) error {
+	if err := rows.Rows.Scan(args...); err != nil {
+		return err
+	}
+	rows.logRow(args...)
+	return nil
+}
+func (rows sqlRows) Close() error {
+	err := rows.Rows.Close()
+	rows.logClose()
+	return err
+}
+
+type sqlRow struct {
+	*sql.Row
+	logRow   func(...any)
+	logClose func()
+}
+
+func (row sqlRow) Scan(args ...any) error {
+	if err := row.Row.Scan(args...); err != nil {
+		return err
+	}
+	row.logRow(args...)
+	row.logClose()
+	return nil
+}
+	

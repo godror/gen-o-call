@@ -1,21 +1,37 @@
 package x
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	//"encoding/base64"
+	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	_ "github.com/godror/godror"
+	"github.com/google/renameio/v2"
 	"github.com/kortschak/utter"
 	"golang.org/x/exp/slog"
+	"golang.org/x/tools/txtar"
 )
 
-var flagConnect = flag.String("connect", os.Getenv("BRUNO_ID"), "DB to connect to")
-var dump = utter.NewDefaultConfig()
+var (
+	flagConnect = flag.String("connect", os.Getenv("BRUNO_ID"), "DB to connect to")
+
+	dump = utter.NewDefaultConfig()
+
+	testFn = filepath.Join("testdata", "db.txtar")
+)
 
 func init() {
 	dump.IgnoreUnexported = true
@@ -75,14 +91,93 @@ END;`,
 		}
 	}
 
-	funcs, err := ReadPackage(ctx, &DB{DB: db}, "GT_gen_o_call")
+	{
+		var files []txtar.File
+		db := DB{DB: SqlDB{
+			DB: db,
+			LogQry: func(qry string, args ...any) (
+				func(...any),
+				func(),
+			) {
+				f := txtar.File{Name: qryArgsString(qry, args)}
+				var buf bytes.Buffer
+				w := json.NewEncoder(&buf)
+				next := func(args ...any) {
+					_ = w.Encode(args)
+				}
+				finish := func() {
+					f.Data = buf.Bytes()
+					files = append(files, f)
+				}
+				return next, finish
+			},
+		}}
+		funcs, err := db.ReadPackage(ctx, "GT_gen_o_call")
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Log("funcs", dump.Sdump(funcs))
+		if err := renameio.WriteFile(
+			testFn,
+			txtar.Format(&txtar.Archive{Files: files}),
+			0644,
+		); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+func TestParseCSV(t *testing.T) {
+	slog.SetDefault(slog.New(slog.HandlerOptions{Level: slog.LevelDebug}.
+		NewTextHandler(testWriter{t})))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ar, err := txtar.ParseFile(testFn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	qrys := make(map[string][][]any, len(ar.Files))
+	for _, f := range ar.Files {
+		dec := json.NewDecoder(bytes.NewReader(f.Data))
+		for {
+			var row []any
+			err := dec.Decode(&row)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				t.Error(err)
+			}
+			qrys[f.Name] = append(qrys[f.Name], row)
+		}
+	}
+
+	db := DB{DB: TestDB{qrys: qrys}}
+	funcs, err := db.ReadPackage(ctx, "GT_gen_o_call")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Log("funcs", dump.Sdump(funcs))
-}
 
-func TestParseCSV(t *testing.T) {
+}
+func qryArgsString(qry string, args []any) string {
+	b, _ := json.Marshal(args)
+	/*return base64.URLEncoding.EncodeToString(append(
+	append(make([]byte, 0, len(qry)+1+len(b)),
+		[]byte(qry+"\n")...), b...))*/
+	var prev rune
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			r = ' '
+			if r == prev {
+				return -1
+			}
+		}
+		prev = r
+		return r
+	},
+		qry) + "\t" + string(b)
 }
 
 type testWriter struct {
@@ -92,4 +187,95 @@ type testWriter struct {
 func (t testWriter) Write(p []byte) (int, error) {
 	t.TB.Log(string(p))
 	return len(p), nil
+}
+
+type TestDB struct {
+	qrys map[string][][]any
+}
+
+func (db TestDB) QueryContext(ctx context.Context, qry string, args ...any) (rowser, error) {
+	k := qryArgsString(qry, args)
+	rows, ok := db.qrys[k]
+	if !ok {
+		return nil, fmt.Errorf("unknown query %q %v", qry, args)
+	}
+	delete(db.qrys, k)
+	return &testRows{rows: rows}, nil
+}
+
+func (db TestDB) QueryRowContext(ctx context.Context, qry string, args ...any) rower {
+	k := qryArgsString(qry, args)
+	rows, ok := db.qrys[k]
+	if !ok {
+		return &testRows{err: fmt.Errorf("unknown query %q %v", qry, args)}
+	}
+	tRows := &testRows{rows: rows}
+	_ = tRows.Next()
+	return tRows
+}
+
+type testRows struct {
+	rows [][]any
+	row  []any
+	err  error
+}
+
+func (rows *testRows) Err() error { return rows.err }
+func (rows *testRows) Next() bool {
+	if len(rows.rows) == 0 || rows.err != nil {
+		return false
+	}
+	rows.row = rows.rows[0]
+	rows.rows = rows.rows[1:]
+	return true
+}
+func (rows *testRows) Scan(args ...any) error {
+	if rows.err != nil {
+		return rows.err
+	}
+	row := rows.row
+	if rows.row == nil { // sql.Row does not call Next
+		rows.Next()
+		row = rows.row
+	}
+	if len(rows.row) != len(args) {
+		return fmt.Errorf("got %d columns (%#v), wanted %d (%#v)",
+			len(args), args, len(row), row,
+		)
+	}
+	for i, a := range args {
+		//slog.Info("scan", "i", i, "row[i]", row[i])
+		v := reflect.ValueOf(row[i])
+		if m, ok := row[i].(map[string]any); ok {
+			//slog.Debug("map", "m", m, "i", fmt.Sprintf("%#v", m["Int32"]), "b", fmt.Sprintf("%#v", m["Valid"]))
+			if i, ok := m["Int32"].(float64); ok {
+				//slog.Debug("Int32", "i", i)
+				if b, ok := m["Valid"].(bool); ok {
+					reflect.ValueOf(a).Elem().Set(reflect.ValueOf(sql.NullInt32{Int32: int32(i), Valid: b}))
+					continue
+				}
+			}
+		} else if f, ok := row[i].(float64); ok {
+			ok = true
+			switch a.(type) {
+			case *int, *int8, *int16, *int32, *int64:
+				reflect.ValueOf(a).Elem().SetInt(int64(f))
+			case *float32, *float64:
+				reflect.ValueOf(a).Elem().SetFloat(f)
+			case *uint, *uint8, *uint16, *uint32, *uint64:
+				reflect.ValueOf(a).Elem().SetUint(uint64(f))
+			default:
+				ok = false
+			}
+			if ok {
+				continue
+			}
+		}
+		slog.Debug("Set", "from", fmt.Sprintf("%[1]T %#[1]v", v.Interface()), "to", fmt.Sprintf("%[1]T %#[1]v", a))
+		reflect.ValueOf(a).Elem().Set(v)
+	}
+	return nil
+}
+func (rows testRows) Close() error {
+	return nil
 }
