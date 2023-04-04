@@ -11,6 +11,7 @@ import (
 
 	_ "github.com/godror/godror"
 	"github.com/kortschak/utter"
+	"golang.org/x/exp/slog"
 )
 
 var flagConnect = flag.String("connect", os.Getenv("BRUNO_ID"), "DB to connect to")
@@ -22,6 +23,8 @@ func init() {
 }
 
 func TestReadDB(t *testing.T) {
+	slog.SetDefault(slog.New(slog.HandlerOptions{Level: slog.LevelDebug}.
+		NewTextHandler(testWriter{t})))
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	db, err := sql.Open("godror", *flagConnect)
@@ -32,16 +35,23 @@ func TestReadDB(t *testing.T) {
 	if err = db.PingContext(ctx); err != nil {
 		t.Fatal(fmt.Errorf("connect to %q: %w", *flagConnect, err))
 	}
-	//defer db.ExecContext(context.Background(), `DROP PACKAGE GT_gen_o_call`)
+	defer db.ExecContext(context.Background(), `DROP PACKAGE GT_gen_o_call`)
 	{
 		for _, qry := range []string{
 			`CREATE OR REPLACE PACKAGE GT_gen_o_call IS
+TYPE vc_tt IS TABLE OF VARCHAR2(32767) INDEX BY PLS_INTEGER;
+TYPE rec_rt IS RECORD (F_txt VARCHAR2(100), F_vc_tt vc_tt);
+TYPE rec_tt IS TABLE OF rec_rt INDEX BY PLS_INTEGER;
+
 TYPE obj_rt IS RECORD (
   F_int PLS_INTEGER,
   F_dt  DATE,
   F_num NUMBER,
   F_clob CLOB,
-  F_str VARCHAR2(1000)
+  F_str VARCHAR2(1000),
+  F_vc_tt vc_tt,
+  F_rec rec_rt,
+  F_rec_tt rec_tt
 );
 TYPE obj_tt IS TABLE OF obj_rt INDEX BY PLS_INTEGER;
 
@@ -73,4 +83,13 @@ END;`,
 }
 
 func TestParseCSV(t *testing.T) {
+}
+
+type testWriter struct {
+	testing.TB
+}
+
+func (t testWriter) Write(p []byte) (int, error) {
+	t.TB.Log(string(p))
+	return len(p), nil
 }

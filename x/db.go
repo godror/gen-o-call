@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"golang.org/x/exp/slog"
 	"strings"
 	"sync"
 )
@@ -36,10 +37,10 @@ type Scalar struct {
 type Object struct {
 	CollectionOf *ObjectOrScalar
 	Triplet
-	Attributes              []Attribute
 	TypeLink                string
 	TypeObjectType, PlsType string
 	IndexBy                 string
+	Attributes              []Attribute
 	IsCollection            bool
 }
 type ObjectOrScalar struct {
@@ -53,8 +54,8 @@ type Triplet struct {
 
 type DB struct {
 	*sql.DB
-	mu       sync.Mutex
 	objCache map[Triplet]*Object
+	mu       sync.Mutex
 }
 
 func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
@@ -118,8 +119,9 @@ func ReadPackage(ctx context.Context, db *DB, pkg string) ([]Function, error) {
 	return funcs, rows.Err()
 }
 func (obj *Object) InitObject(ctx context.Context, db *DB) error {
-	db.mu.Lock()
+	slog.Debug("InitObject", "obj", obj.Triplet)
 	{
+		db.mu.Lock()
 		c := db.objCache[obj.Triplet]
 		db.mu.Unlock()
 		if c != nil {
@@ -137,6 +139,7 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 	); err != nil {
 		return fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
 	}
+	slog.Debug("IsCollection", "typ", typ, "n", n)
 	if n != 0 {
 		obj.Attributes = make([]Attribute, 0, int(n))
 		const qry = `SELECT attr_name, 
@@ -158,6 +161,9 @@ func (obj *Object) InitObject(ctx context.Context, db *DB) error {
 				&a.Type.Length, &a.Type.Precision, &a.Type.Scale,
 			); err != nil {
 				return fmt.Errorf("%s [%q]: %w", qry, obj.Triplet, err)
+			}
+			if a.Type.IsObject = a.Type.Owner != ""; a.Type.IsObject {
+				a.Type.InitObject(ctx, db)
 			}
 			obj.Attributes = append(obj.Attributes, a)
 		}
