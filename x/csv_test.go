@@ -59,6 +59,8 @@ TYPE vc_tt IS TABLE OF VARCHAR2(32767) INDEX BY PLS_INTEGER;
 TYPE rec_rt IS RECORD (F_txt VARCHAR2(100), F_vc_tt vc_tt);
 TYPE rec_tt IS TABLE OF rec_rt INDEX BY PLS_INTEGER;
 
+TYPE cur_ct IS REF CURSOR RETURN rec_rt;
+
 TYPE obj_rt IS RECORD (
   F_int PLS_INTEGER,
   F_dt  DATE,
@@ -67,7 +69,8 @@ TYPE obj_rt IS RECORD (
   F_str VARCHAR2(1000),
   F_vc_tt vc_tt,
   F_rec rec_rt,
-  F_rec_tt rec_tt
+  F_rec_tt rec_tt,
+  F_cursor cur_ct
 );
 TYPE obj_tt IS TABLE OF obj_rt INDEX BY PLS_INTEGER;
 
@@ -163,9 +166,6 @@ func TestParseCSV(t *testing.T) {
 }
 func qryArgsString(qry string, args []any) string {
 	b, _ := json.Marshal(args)
-	/*return base64.URLEncoding.EncodeToString(append(
-	append(make([]byte, 0, len(qry)+1+len(b)),
-		[]byte(qry+"\n")...), b...))*/
 	var prev rune
 	return strings.Map(func(r rune) rune {
 		if unicode.IsSpace(r) {

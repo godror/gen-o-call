@@ -13,9 +13,6 @@ import (
 	"time"
 )
 
-// Log is discarded by default.
-var Log = func(...interface{}) error { return nil }
-
 const (
 	MarkNull = "\u2400" // 0x2400 = nul
 	//MarkValid  = "\u6eff" // 0x6eff = fill; full, satisfied

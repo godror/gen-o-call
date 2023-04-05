@@ -1,10 +1,8 @@
-/*
-Copyright 2019 Tamás Gulácsi
+// Copyright 2019, 2034 Tamás Gulácsi. All rights reserved.
 
 // SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
-*/
 
-package genocall
+package x
 
 import (
 	"bytes"
@@ -13,20 +11,10 @@ import (
 	"io"
 	"strings"
 	"unicode"
-
-	fstructs "github.com/fatih/structs"
-	errors "golang.org/x/xerrors"
 )
 
-var SkipMissingTableOf = true
-
-var Gogo bool
-var NumberAsString bool
-
 //go:generate sh ./download-protoc.sh
-//go:generate go get -u github.com/gogo/protobuf/protoc-gen-gogofast
 
-// build: protoc --gogofast_out=plugins=grpc:. my.proto
 // build: protoc --go_out=plugins=grpc:. my.proto
 
 func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
@@ -38,29 +26,17 @@ func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 	if pkg != "" {
 		fmt.Fprintf(w, "package %s;\n", pkg)
 	}
-	if Gogo {
-		io.WriteString(w, `
-	import "google/protobuf/timestamp.proto";
-	import "github.com/gogo/protobuf/gogoproto/gogo.proto";
-`)
-	}
 	seen := make(map[string]struct{}, 16)
 
 	services := make([]string, 0, len(functions))
 
-FunLoop:
 	for _, fun := range functions {
 		//b, _ := json.Marshal(struct{Name, Documentation string}{Name:fun.FullName(), Documentation:fun.Documentation})
 		//fmt.Println(string(b))
 		fName := fun.AliasedName()
 		fName = strings.ToLower(fName)
 		if err := fun.SaveProtobuf(w, seen); err != nil {
-			if SkipMissingTableOf && (errors.Is(err, ErrMissingTableOf) ||
-				errors.Is(err, UnknownSimpleType)) {
-				Log("msg", "SKIP function, missing TableOf info", "function", fName)
-				continue FunLoop
-			}
-			return errors.Errorf("%s: %w", fun.Name, err)
+			return fmt.Errorf("%s: %w", fun.Name, err)
 		}
 		var streamQual string
 		if fun.HasCursorOut() {
@@ -94,18 +70,18 @@ FunLoop:
 func (f Function) SaveProtobuf(dst io.Writer, seen map[string]struct{}) error {
 	var buf bytes.Buffer
 	if err := f.saveProtobufDir(&buf, seen, false); err != nil {
-		return errors.Errorf("%s: %w", "input", err)
+		return fmt.Errorf("%s: %w", "input", err)
 	}
 	if err := f.saveProtobufDir(&buf, seen, true); err != nil {
-		return errors.Errorf("%s: %w", "output", err)
+		return fmt.Errorf("%s: %w", "output", err)
 	}
 	_, err := dst.Write(buf.Bytes())
 	return err
 }
 func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out bool) error {
-	dirmap, dirname := DIR_IN, "input"
+	dirmap, dirname := DirIn, "input"
 	if out {
-		dirmap, dirname = DIR_OUT, "output"
+		dirmap, dirname = DirOut, "output"
 	}
 	args := make([]Argument, 0, len(f.Args)+1)
 	for _, arg := range f.Args {
@@ -115,7 +91,7 @@ func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out b
 	}
 	// return variable for function out structs
 	if out && f.Returns != nil {
-		args = append(args, *f.Returns)
+		args = append(args, Argument{Attribute: *f.Returns})
 	}
 
 	nm := f.Name
@@ -130,12 +106,6 @@ func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out b
 var dot2D = strings.NewReplacer(".", "__")
 
 func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{}, D argDocs, args ...Argument) error {
-	for _, arg := range args {
-		if arg.Flavor == FLAVOR_TABLE && arg.TableOf == nil {
-			return errors.Errorf("no table of data for %s.%s (%v): %w", msgName, arg, arg, ErrMissingTableOf)
-		}
-	}
-
 	var err error
 	w := &errWriter{Writer: dst, err: &err}
 	fmt.Fprintf(w, "%smessage %s {\n", asComment(strings.TrimRight(D.Pre+D.Post, " \n\t"), ""), msgName)
@@ -147,16 +117,13 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 		if strings.HasSuffix(arg.Name, "#") {
 			arg.Name = replHidden(arg.Name)
 		}
-		if arg.Flavor == FLAVOR_TABLE {
-			if arg.TableOf == nil {
-				return errors.Errorf("no table of data for %s.%s (%v): %w", msgName, arg, arg, ErrMissingTableOf)
-			}
+		if arg.Type.IsCollection {
 			rule = "repeated "
 		}
 		aName := arg.Name
 		got, err := arg.goType(false)
 		if err != nil {
-			return errors.Errorf("%s: %w", msgName, err)
+			return fmt.Errorf("%s: %w", msgName, err)
 		}
 		got = strings.TrimPrefix(got, "*")
 		if strings.HasPrefix(got, "[]") {
@@ -276,28 +243,26 @@ func (opts protoOptions) String() string {
 	return buf.String()
 }
 
-func CopyStruct(dest interface{}, src interface{}) error {
-	ds := fstructs.New(dest)
-	ss := fstructs.New(src)
-	snames := ss.Names()
-	svalues := ss.Values()
-	for _, df := range ds.Fields() {
-		dnm := df.Name()
-		for i, snm := range snames {
-			if snm == dnm || dnm == CamelCase(snm) || CamelCase(dnm) == snm {
-				svalue := svalues[i]
-				if err := df.Set(svalue); err != nil {
-					return errors.Errorf("set %q to %q (%v %T): %w", dnm, snm, svalue, svalue, err)
-				}
-			}
-		}
-	}
-	return nil
-}
 func mkRecTypName(name string) string { return strings.ToLower(name) + "_rek_typ" }
 
 func asComment(s, prefix string) string {
 	return "\n" + prefix + "// " + strings.Replace(s, "\n", "\n"+prefix+"// ", -1) + "\n"
+}
+
+type errWriter struct {
+	io.Writer
+	err *error
+}
+
+func (ew errWriter) Write(p []byte) (int, error) {
+	if ew.err != nil && *ew.err != nil {
+		return 0, *ew.err
+	}
+	n, err := ew.Writer.Write(p)
+	if err != nil {
+		*ew.err = err
+	}
+	return n, err
 }
 
 type argDocs struct {
@@ -326,4 +291,55 @@ func (D *argDocs) Parse(doc string) {
 }
 func firstNotSpace(doc string) int {
 	return strings.IndexFunc(doc, func(r rune) bool { return !unicode.IsSpace(r) })
+}
+func replHidden(text string) string {
+	if text == "" {
+		return text
+	}
+	if text[len(text)-1] == '#' {
+		return text[:len(text)-1] + MarkHidden
+	}
+	return text
+}
+
+var digitUnder = strings.NewReplacer(
+	"_0", "__0",
+	"_1", "__1",
+	"_2", "__2",
+	"_3", "__3",
+	"_4", "__4",
+	"_5", "__5",
+	"_6", "__6",
+	"_7", "__7",
+	"_8", "__8",
+	"_9", "__9",
+)
+
+func CamelCase(text string) string {
+	text = replHidden(text)
+	if text == "" {
+		return text
+	}
+	var prefix string
+	if text[0] == '*' {
+		prefix, text = "*", text[1:]
+	}
+
+	text = digitUnder.Replace(text)
+	var last rune
+	return prefix + strings.Map(func(r rune) rune {
+		defer func() { last = r }()
+		if r == '_' {
+			if last != '_' {
+				return -1
+			}
+			return '_'
+		}
+		if last == 0 || last == '_' || last == '.' || '0' <= last && last <= '9' {
+			return unicode.ToUpper(r)
+		}
+		return unicode.ToLower(r)
+	},
+		text,
+	)
 }

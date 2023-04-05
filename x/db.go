@@ -4,17 +4,100 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"golang.org/x/exp/slog"
 	"strings"
 	"sync"
+	"time"
+
+	"golang.org/x/exp/slog"
 )
 
-type Direction uint8
+func (f Function) FullName() string {
+	nm := strings.ToLower(f.Name)
+	if f.Alias != "" {
+		nm = strings.ToLower(f.Name)
+	}
+	if f.Package == "" {
+		return nm
+	}
+	return UnoCap(f.Package) + "." + nm
+}
+func (f Function) RealName() string {
+	if f.Replacement != nil {
+		return f.Replacement.RealName()
+	}
+	nm := strings.ToLower(f.Name)
+	if f.Package == "" {
+		return nm
+	}
+	return UnoCap(f.Package) + "." + nm
+}
+func (f Function) AliasedName() string {
+	if f.Alias != "" {
+		return f.Alias
+	}
+	return f.Name
+}
+
+func (f Function) String() string {
+	args := make([]string, len(f.Args))
+	for i := range args {
+		args[i] = f.Args[i].String()
+	}
+	s := f.FullName() + "(" + strings.Join(args, ", ") + ")"
+	if f.Documentation == "" {
+		return s
+	}
+	return s + "\n" + f.Documentation
+}
+
+func (f Function) HasCursorOut() bool {
+	if f.Returns != nil && f.Returns.Type.DataType == "REF CURSOR" {
+		return true
+	}
+	for _, arg := range f.Args {
+		if arg.IsOutput() && arg.Type.DataType == "REF CURSOR" {
+			return true
+		}
+	}
+	return false
+}
+
+type direction uint8
+
+func (dir direction) IsInput() bool  { return dir&DirIn > 0 }
+func (dir direction) IsOutput() bool { return dir&DirOut > 0 }
+func (dir direction) String() string {
+	switch dir {
+	case DirIn:
+		return "IN"
+	case DirOut:
+		return "OUT"
+	case DirInOut:
+		return "INOUT"
+	}
+	return fmt.Sprintf("%d", dir)
+}
+func (dir direction) MarshalText() ([]byte, error) {
+	return []byte(dir.String()), nil
+}
+func (dir *direction) UnmarshalText(p []byte) error {
+	switch string(p) {
+	case "IN":
+		*dir = DirIn
+	case "OUT":
+		*dir = DirOut
+	case "INOUT":
+		*dir = DirInOut
+	default:
+		return fmt.Errorf("unknown dir %q", string(p))
+	}
+	return nil
+}
 
 const (
-	DirIn    = Direction(0)
-	DirOut   = Direction(1)
-	DirInOut = Direction(2)
+	DirIn    = direction(1)
+	DirOut   = direction(2)
+	DirInOut = direction(3)
 )
 
 type Attribute struct {
@@ -23,11 +106,29 @@ type Attribute struct {
 }
 type Argument struct {
 	Attribute
-	InOut Direction
+	Direction direction
 }
+
+func (a Argument) String() string { return fmt.Sprintf("%s %s %s", a.Name, a.Direction, a.Attribute) }
+
+func (a Argument) IsInput() bool {
+	return a.Direction&DirIn != 0
+}
+func (a Argument) IsOutput() bool {
+	return a.Direction&DirOut != 0
+}
+
 type Function struct {
 	Triplet
-	Args []Argument
+	Alias             string     `json:",omitempty"`
+	Args              []Argument `json:",omitempty"`
+	Returns           *Attribute `json:",omitempty"`
+	Replacement       *Function  `json:",omitempty"`
+	ReplacementIsJSON bool       `json:",omitempty"`
+	LastDDL           time.Time  `json:",omitempty"`
+	handle            []string
+	Documentation     string `json:",omitempty"`
+	maxTableSize      int
 }
 
 type Scalar struct {
@@ -98,11 +199,11 @@ func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 		}
 		switch inOut {
 		case "IN":
-			arg.InOut = DirIn
+			arg.Direction = DirIn
 		case "OUT":
-			arg.InOut = DirOut
+			arg.Direction = DirOut
 		default:
-			arg.InOut = DirInOut
+			arg.Direction = DirInOut
 		}
 		if old.Owner == act.Owner && old.Package == act.Package && old.Name == act.Name {
 			old.Args = append(old.Args, arg)
@@ -117,6 +218,13 @@ func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 	rows.Close()
 	if old.Name != "" {
 		funcs = append(funcs, old)
+	}
+
+	for _, f := range funcs {
+		if len(f.Args) != 0 && f.Args[0].Name == "" {
+			f.Returns = &f.Args[0].Attribute
+			f.Args = f.Args[1:]
+		}
 	}
 	return funcs, rows.Err()
 }
@@ -283,4 +391,16 @@ func (row sqlRow) Scan(args ...any) error {
 	row.logClose()
 	return nil
 }
-	
+func UnoCap(text string) string {
+	i := strings.Index(text, "_")
+	if i == 0 {
+		return capitalize(text)
+	}
+	return strings.ToUpper(text[:i]) + "_" + strings.ToLower(text[i+1:])
+}
+func capitalize(text string) string {
+	if text == "" {
+		return text
+	}
+	return strings.ToUpper(text[:1]) + strings.ToLower(text[1:])
+}
