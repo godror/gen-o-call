@@ -99,11 +99,25 @@ const (
 	DirOut   = direction(2)
 	DirInOut = direction(3)
 )
+const (
+	MarkNull = "\u2400" // 0x2400 = nul
+	//MarkValid  = "\u6eff" // 0x6eff = fill; full, satisfied
+	MarkValid = "Valid" // 0x6eff = fill; full, satisfied
+	//MarkHidden = "\u533f"     // 0x533f = hide
+	MarkHidden = "_hidden"
+
+	DefaultMaxVARCHARLength = 32767
+	DefaultMaxCHARLength    = 10
+)
 
 type Attribute struct {
-	Name string
-	Type ObjectOrScalar
+	Name, AbsType, goTypeName string
+	Type                      ObjectOrScalar
 }
+
+func (a Attribute) IsScalar() bool      { return a.Type.IsScalar() }
+func (a ObjectOrScalar) IsScalar() bool { return !a.IsObject && !a.IsCollection }
+
 type Argument struct {
 	Attribute
 	Direction direction
@@ -204,6 +218,27 @@ func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 			arg.Direction = DirOut
 		default:
 			arg.Direction = DirInOut
+		}
+		switch arg.Type.Name {
+		case "CHAR", "NCHAR", "VARCHAR", "NVARCHAR", "VARCHAR2", "NVARCHAR2":
+			if arg.Type.Length.Int32 == 0 {
+				if strings.Contains(arg.Type.Name, "VAR") {
+					arg.Type.Length = sql.NullInt32{Valid: true, Int32: DefaultMaxVARCHARLength}
+				} else {
+					arg.Type.Length.Int32 = DefaultMaxCHARLength
+				}
+			}
+			arg.AbsType = fmt.Sprintf("%s(%d)", arg.Type, arg.Type.Length.Int32)
+		case "NUMBER":
+			if arg.Type.Scale.Int32 > 0 {
+				arg.AbsType = fmt.Sprintf("NUMBER(%d, %d)", arg.Type.Precision.Int32, arg.Type.Scale.Int32)
+			} else if arg.Type.Precision.Int32 > 0 {
+				arg.AbsType = fmt.Sprintf("NUMBER(%d)", arg.Type.Precision.Int32)
+			} else {
+				arg.AbsType = "NUMBER"
+			}
+		case "PLS_INTEGER", "BINARY_INTEGER":
+			arg.AbsType = "INTEGER(10)"
 		}
 		if old.Owner == act.Owner && old.Package == act.Package && old.Name == act.Name {
 			old.Args = append(old.Args, arg)

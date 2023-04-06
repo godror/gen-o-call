@@ -6,16 +6,22 @@ package x
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
-	//"encoding/json"
 	"io"
+	"regexp"
 	"strings"
+	"sync"
 	"unicode"
+
+	"golang.org/x/exp/slog"
 )
 
 //go:generate sh ./download-protoc.sh
 
 // build: protoc --go_out=plugins=grpc:. my.proto
+
+var UnknownSimpleType = errors.New("unknown simple type")
 
 func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 	var err error
@@ -139,7 +145,7 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 		if s := pOpts.String(); s != "" {
 			optS = " " + s
 		}
-		if arg.Flavor == FLAVOR_SIMPLE || arg.Flavor == FLAVOR_TABLE && arg.TableOf.Flavor == FLAVOR_SIMPLE {
+		if !arg.Type.IsObject && !arg.Type.IsCollection {
 			fmt.Fprintf(w, "%s\t// %s\n\t%s%s %s = %d%s;\n", asComment(D.Map[aName], "\t"), arg.AbsType, rule, typ, aName, i+1, optS)
 			continue
 		}
@@ -148,21 +154,21 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 			seen[typ] = struct{}{}
 			//lName := strings.ToLower(arg.Name)
 			subArgs := make([]Argument, 0, 16)
-			if arg.TableOf == nil {
-				for _, v := range arg.RecordOf {
-					subArgs = append(subArgs, *v.Argument)
+			if arg.Type.CollectionOf == nil {
+				for _, v := range arg.Type.Attributes {
+					subArgs = append(subArgs, Argument{Attribute: v, Direction: arg.Direction})
 				}
 			} else {
-				if arg.TableOf.RecordOf == nil {
-					subArgs = append(subArgs, *arg.TableOf)
+				if arg.Type.CollectionOf.IsObject {
+					subArgs = append(subArgs, Argument{Attribute: Attribute{Type: *arg.Type.CollectionOf}, Direction: arg.Direction})
 				} else {
-					for _, v := range arg.TableOf.RecordOf {
+					for _, v := range arg.CollectionOf.Object {
 						subArgs = append(subArgs, *v.Argument)
 					}
 				}
 			}
 			if err = protoWriteMessageTyp(buf, typ, seen, argDocs{Pre: D.Map[aName]}, subArgs...); err != nil {
-				Log("msg", "protoWriteMessageTyp", "error", err)
+				slog.Error("msg", "protoWriteMessageTyp", "error", err)
 				return err
 			}
 		}
@@ -180,18 +186,8 @@ func protoType(got, aName, absType string) (string, protoOptions) {
 		return "string", nil
 
 	case "int32":
-		if NumberAsString {
-			return "sint32", protoOptions{
-				"gogoproto.jsontag": aName + ",string,omitempty",
-			}
-		}
 		return "sint32", nil
 	case "float64", "sql.nullfloat64":
-		if NumberAsString {
-			return "double", protoOptions{
-				"gogoproto.jsontag": aName + ",string,omitempty",
-			}
-		}
 		return "double", nil
 
 	case "godror.number":
@@ -265,33 +261,6 @@ func (ew errWriter) Write(p []byte) (int, error) {
 	return n, err
 }
 
-type argDocs struct {
-	Pre, Post string
-	Docs      []string
-	Map       map[string]string
-}
-
-func (D *argDocs) Parse(doc string) {
-	D.Docs = splitByOffset(doc)
-	for _, line := range D.Docs {
-		sline := strings.TrimSpace(line)
-		if sline == "" || !(sline[0] == '-' || sline[0] == '*') {
-			continue
-		}
-		sline = strings.TrimLeft(sline[1:], " \t")
-		i := strings.IndexAny(sline, "-:")
-		if i < 0 {
-			continue
-		}
-		if D.Map == nil {
-			D.Map = make(map[string]string)
-		}
-		D.Map[strings.TrimRight(sline[:i], " \t")] = strings.TrimLeft(sline[i+1:], " \t")
-	}
-}
-func firstNotSpace(doc string) int {
-	return strings.IndexFunc(doc, func(r rune) bool { return !unicode.IsSpace(r) })
-}
 func replHidden(text string) string {
 	if text == "" {
 		return text
@@ -342,4 +311,142 @@ func CamelCase(text string) string {
 	},
 		text,
 	)
+}
+func (f Function) getPlsqlConstName() string {
+	nm := f.AliasedName()
+	return capitalize(f.Package + "__" + nm + "__plsql")
+}
+
+func (f Function) getStructName(out, withPackage bool) string {
+	dirname := "input"
+	if out {
+		dirname = "output"
+	}
+	nm := f.AliasedName()
+	if !withPackage {
+		return nm + "__" + dirname
+	}
+	return capitalize(f.Package + "__" + nm + "__" + dirname)
+}
+
+var Buffers = newBufPool(1 << 16)
+
+type bufPool struct {
+	sync.Pool
+}
+
+func newBufPool(size int) *bufPool {
+	return &bufPool{sync.Pool{New: func() interface{} { return bytes.NewBuffer(make([]byte, 0, 1<<16)) }}}
+}
+func (bp *bufPool) Get() *bytes.Buffer {
+	return bp.Pool.Get().(*bytes.Buffer)
+}
+func (bp *bufPool) Put(b *bytes.Buffer) {
+	if b == nil {
+		return
+	}
+	b.Reset()
+	bp.Pool.Put(b)
+}
+
+var rIdentifier = regexp.MustCompile(`:([0-9a-zA-Z][a-zA-Z0-9_]*)`)
+
+func (arg *Argument) goType(isTable bool) (typName string, err error) {
+	defer func() {
+		if strings.HasPrefix(typName, "**") {
+			typName = typName[1:]
+		}
+	}()
+	// cached?
+	if arg.goTypeName != "" {
+		if strings.Index(arg.goTypeName, "__") > 0 {
+			return "*" + arg.goTypeName, nil
+		}
+		return arg.goTypeName, nil
+	}
+	defer func() {
+		// cache it
+		arg.goTypeName = typName
+	}()
+	if arg.Type.IsScalar() {
+		switch arg.Type.Name {
+		case "CHAR", "VARCHAR2", "ROWID":
+			if !isTable && arg.IsOutput() {
+				//return "*string", nil
+				return "string", nil
+			}
+			return "string", nil // NULL is the same as the empty string for Oracle
+		case "RAW":
+			return "[]byte", nil
+		case "NUMBER":
+			return "godror.Number", nil
+		case "INTEGER":
+			if !isTable && arg.IsOutput() {
+				return "*int64", nil
+			}
+			return "int64", nil
+		case "PLS_INTEGER", "BINARY_INTEGER":
+			if !isTable && arg.IsOutput() {
+				//return "*int32", nil
+				return "int32", nil
+			}
+			return "int32", nil
+		case "BOOLEAN", "PL/SQL BOOLEAN":
+			if !isTable && arg.IsOutput() {
+				return "*bool", nil
+			}
+			return "bool", nil
+		case "DATE", "DATETIME", "TIME", "TIMESTAMP":
+			return "time.Time", nil
+		case "REF CURSOR":
+			return "*sql.Rows", nil
+		case "BLOB":
+			return "[]byte", nil
+		case "CLOB":
+			return "string", nil
+		case "BFILE":
+			return "ora.Bfile", nil
+		default:
+			return "", fmt.Errorf("%v: %w", arg, UnknownSimpleType)
+		}
+	}
+	typName = arg.Type.Name
+	chunks := strings.Split(typName, ".")
+	switch len(chunks) {
+	case 1:
+	case 2:
+		typName = chunks[1] + "__" + chunks[0]
+	default:
+		typName = strings.Join(chunks[1:], "__") + "__" + chunks[0]
+	}
+	//typName = goName(capitalize(typName))
+	typName = capitalize(typName)
+
+	if arg.Type.IsCollection {
+		//Log("msg", "TABLE", "arg", arg, "tableOf", arg.TableOf)
+		targ := Argument{Attribute: Attribute{Type: *arg.Type.CollectionOf}, Direction: DirIn}
+		tn, err := targ.goType(true)
+		if err != nil {
+			return tn, err
+		}
+		tn = "[]" + tn
+		if arg.Type.Name != "REF CURSOR" {
+			if arg.IsOutput() && !arg.Type.CollectionOf.IsObject && !arg.Type.CollectionOf.IsCollection {
+				return "*" + tn, nil
+			}
+			return tn, nil
+		}
+		cn := tn[2:]
+		if cn[0] == '*' {
+			cn = cn[1:]
+		}
+		return cn, nil
+	}
+
+	// FLAVOR_RECORD
+	if false && arg.Type.Name == "" {
+		slog.Warn("msg", "arg has no TypeName", "arg", arg, "arg", fmt.Sprintf("%#v", arg))
+		arg.Type.Name = strings.ToLower(arg.Name)
+	}
+	return "*" + typName, nil
 }
