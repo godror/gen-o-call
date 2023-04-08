@@ -13,8 +13,6 @@ import (
 	"strings"
 	"sync"
 	"unicode"
-
-	"golang.org/x/exp/slog"
 )
 
 //go:generate sh ./download-protoc.sh
@@ -123,6 +121,11 @@ func (t Triplet) ProtoName(dirname string) string {
 }
 
 func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{}, D argDocs, args []Argument) error {
+	if _, ok := seen[msgName]; ok {
+		return nil
+	}
+	seen[msgName] = struct{}{}
+
 	var err error
 	w := &errWriter{Writer: dst, err: &err}
 	fmt.Fprintf(w, "%smessage %s {\n", asComment(strings.TrimRight(D.Pre+D.Post, " \n\t"), ""), msgName)
@@ -131,25 +134,31 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 	defer Buffers.Put(buf)
 	for i, arg := range args {
 		var rule string
-		if strings.HasSuffix(arg.Name, "#") {
-			arg.Name = replHidden(arg.Name)
-		}
 		if arg.Type.IsCollection {
 			rule = "repeated "
 		}
+		if strings.HasSuffix(arg.Name, "#") {
+			arg.Name = replHidden(arg.Name)
+		}
+		aName := arg.Name
+
 		if o := arg.Type.Object; arg.Type.IsObject {
 			subArgs := make([]Argument, len(o.Attributes))
 			for i, v := range o.Attributes {
 				subArgs[i] = Argument{Attribute: v, Direction: arg.Direction}
 			}
-			if err := protoWriteMessageTyp(buf, o.Triplet.ProtoName(""), seen, D, subArgs); err != nil {
+			subName :=
+				o.Triplet.ProtoName("")
+			if err := protoWriteMessageTyp(buf, subName, seen, D, subArgs); err != nil {
 				return err
 			}
+
+			fmt.Fprintf(w, "\t%s%s %s = %d;\n", rule, aName, subName, i+1)
 			continue
 		}
 
-		aName := arg.Name
-		got, err := arg.goType(false)
+		// simple type, maybe collection
+		got, err := arg.goType()
 		if err != nil {
 			return fmt.Errorf("%s: %w", msgName, err)
 		}
@@ -159,42 +168,17 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 			got = got[2:]
 		}
 		got = strings.TrimPrefix(got, "*")
-		if got == "" {
-			got = mkRecTypName(arg.Name)
-		}
 		typ, pOpts := protoType(got, arg.Name, arg.AbsType)
 		var optS string
 		if s := pOpts.String(); s != "" {
 			optS = " " + s
 		}
-		if !arg.Type.IsObject && !arg.Type.IsCollection {
+		if !arg.Type.IsCollection {
 			fmt.Fprintf(w, "%s\t// %s\n\t%s%s %s = %d%s;\n", asComment(D.Map[aName], "\t"), arg.AbsType, rule, typ, aName, i+1, optS)
 			continue
 		}
-		typ = CamelCase(typ)
-		if _, ok := seen[typ]; !ok {
-			seen[typ] = struct{}{}
-			//lName := strings.ToLower(arg.Name)
-			subArgs := make([]Argument, 0, 16)
-			if arg.Type.CollectionOf == nil {
-				for _, v := range arg.Type.Attributes {
-					subArgs = append(subArgs, Argument{Attribute: v, Direction: arg.Direction})
-				}
-			} else {
-				if arg.Type.CollectionOf.IsObject {
-					subArgs = append(subArgs, Argument{Attribute: Attribute{Type: *arg.Type.CollectionOf}, Direction: arg.Direction})
-				} else {
-					for _, v := range arg.CollectionOf.Object {
-						subArgs = append(subArgs, *v.Argument)
-					}
-				}
-			}
-			if err = protoWriteMessageTyp(buf, typ, seen, argDocs{Pre: D.Map[aName]}, subArgs); err != nil {
-				slog.Error("msg", "protoWriteMessageTyp", "error", err)
-				return err
-			}
-		}
-		fmt.Fprintf(w, "\t%s%s %s = %d%s;\n", rule, typ, aName, i+1, optS)
+
+		fmt.Fprintf(w, "\t%s%s %s = %d%s;\n", rule, CamelCase(typ), aName, i+1, optS)
 	}
 	io.WriteString(w, "}\n")
 	w.Write(buf.Bytes())
@@ -261,7 +245,7 @@ func (opts protoOptions) String() string {
 	return buf.String()
 }
 
-func mkRecTypName(name string) string { return strings.ToLower(name) + "_rek_typ" }
+func mkRecTypName(name string) string { return strings.ToLower(name) + "_rt" }
 
 func asComment(s, prefix string) string {
 	return "\n" + prefix + "// " + strings.Replace(s, "\n", "\n"+prefix+"// ", -1) + "\n"
@@ -373,7 +357,7 @@ func (bp *bufPool) Put(b *bytes.Buffer) {
 
 var rIdentifier = regexp.MustCompile(`:([0-9a-zA-Z][a-zA-Z0-9_]*)`)
 
-func (arg *Argument) goType(isTable bool) (typName string, err error) {
+func (arg *Argument) goType() (typName string, err error) {
 	defer func() {
 		if strings.HasPrefix(typName, "**") {
 			typName = typName[1:]
@@ -393,7 +377,7 @@ func (arg *Argument) goType(isTable bool) (typName string, err error) {
 	if arg.Type.IsScalar() {
 		switch arg.Type.Name {
 		case "CHAR", "VARCHAR2", "ROWID":
-			if !isTable && arg.IsOutput() {
+			if !arg.Type.IsCollection && arg.IsOutput() {
 				//return "*string", nil
 				return "string", nil
 			}
@@ -403,18 +387,18 @@ func (arg *Argument) goType(isTable bool) (typName string, err error) {
 		case "NUMBER":
 			return "godror.Number", nil
 		case "INTEGER":
-			if !isTable && arg.IsOutput() {
+			if !arg.Type.IsCollection && arg.IsOutput() {
 				return "*int64", nil
 			}
 			return "int64", nil
 		case "PLS_INTEGER", "BINARY_INTEGER":
-			if !isTable && arg.IsOutput() {
+			if !arg.Type.IsCollection && arg.IsOutput() {
 				//return "*int32", nil
 				return "int32", nil
 			}
 			return "int32", nil
 		case "BOOLEAN", "PL/SQL BOOLEAN":
-			if !isTable && arg.IsOutput() {
+			if !arg.Type.IsCollection && arg.IsOutput() {
 				return "*bool", nil
 			}
 			return "bool", nil
@@ -447,7 +431,7 @@ func (arg *Argument) goType(isTable bool) (typName string, err error) {
 	if arg.Type.IsCollection {
 		//Log("msg", "TABLE", "arg", arg, "tableOf", arg.TableOf)
 		targ := Argument{Attribute: Attribute{Type: *arg.Type.CollectionOf}, Direction: DirIn}
-		tn, err := targ.goType(true)
+		tn, err := targ.goType()
 		if err != nil {
 			return tn, err
 		}
@@ -465,10 +449,5 @@ func (arg *Argument) goType(isTable bool) (typName string, err error) {
 		return cn, nil
 	}
 
-	// FLAVOR_RECORD
-	if false && arg.Type.Name == "" {
-		slog.Warn("msg", "arg has no TypeName", "arg", arg, "arg", fmt.Sprintf("%#v", arg))
-		arg.Type.Name = strings.ToLower(arg.Name)
-	}
 	return "*" + typName, nil
 }

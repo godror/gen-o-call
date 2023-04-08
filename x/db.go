@@ -123,7 +123,9 @@ type Argument struct {
 	Direction direction
 }
 
-func (a Argument) String() string { return fmt.Sprintf("%s %s %s", a.Name, a.Direction, a.Attribute) }
+func (a Argument) String() string {
+	return fmt.Sprintf("%s %s %s", a.Name, a.Direction, a.Attribute.Type.Triplet)
+}
 
 func (a Argument) IsInput() bool {
 	return a.Direction&DirIn != 0
@@ -228,7 +230,7 @@ func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 					arg.Type.Length.Int32 = DefaultMaxCHARLength
 				}
 			}
-			arg.AbsType = fmt.Sprintf("%s(%d)", arg.Type, arg.Type.Length.Int32)
+			arg.AbsType = fmt.Sprintf("%s(%d)", arg.Type.Name, arg.Type.Length.Int32)
 		case "NUMBER":
 			if arg.Type.Scale.Int32 > 0 {
 				arg.AbsType = fmt.Sprintf("NUMBER(%d, %d)", arg.Type.Precision.Int32, arg.Type.Scale.Int32)
