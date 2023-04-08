@@ -106,12 +106,23 @@ func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out b
 	}
 	return protoWriteMessageTyp(dst,
 		CamelCase(dot2D.Replace(strings.ToLower(nm))+"__"+dirname),
-		seen, getDirDoc(f.Documentation, dirmap), args...)
+		seen, getDirDoc(f.Documentation, dirmap), args)
 }
 
 var dot2D = strings.NewReplacer(".", "__")
 
-func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{}, D argDocs, args ...Argument) error {
+func (t Triplet) ProtoName(dirname string) string {
+	var buf strings.Builder
+	for _, nm := range []string{t.Owner, t.Package, t.Name, dirname} {
+		if buf.Len() != 0 {
+			buf.WriteString("__")
+		}
+		buf.WriteString(strings.ToLower(nm))
+	}
+	return CamelCase(buf.String())
+}
+
+func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{}, D argDocs, args []Argument) error {
 	var err error
 	w := &errWriter{Writer: dst, err: &err}
 	fmt.Fprintf(w, "%smessage %s {\n", asComment(strings.TrimRight(D.Pre+D.Post, " \n\t"), ""), msgName)
@@ -126,6 +137,17 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 		if arg.Type.IsCollection {
 			rule = "repeated "
 		}
+		if o := arg.Type.Object; arg.Type.IsObject {
+			subArgs := make([]Argument, len(o.Attributes))
+			for i, v := range o.Attributes {
+				subArgs[i] = Argument{Attribute: v, Direction: arg.Direction}
+			}
+			if err := protoWriteMessageTyp(buf, o.Triplet.ProtoName(""), seen, D, subArgs); err != nil {
+				return err
+			}
+			continue
+		}
+
 		aName := arg.Name
 		got, err := arg.goType(false)
 		if err != nil {
@@ -167,7 +189,7 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 					}
 				}
 			}
-			if err = protoWriteMessageTyp(buf, typ, seen, argDocs{Pre: D.Map[aName]}, subArgs...); err != nil {
+			if err = protoWriteMessageTyp(buf, typ, seen, argDocs{Pre: D.Map[aName]}, subArgs); err != nil {
 				slog.Error("msg", "protoWriteMessageTyp", "error", err)
 				return err
 			}
