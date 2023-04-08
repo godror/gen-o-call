@@ -18,8 +18,8 @@ import (
 	"golang.org/x/exp/slog"
 )
 
-//go:generate sh ./download-protoc.sh
-
+// go:generate sh ./download-protoc.sh
+// go:generate go install github.com/bufbuild/buf/cmd/...@latest
 // build: protoc --go_out=plugins=grpc:. my.proto
 
 var UnknownScalarType = errors.New("unknown scalar type")

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"os/exec"
 	//"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -44,6 +45,31 @@ func testFuncs(t *testing.T, funcs []Function) {
 	t.Log(buf.String())
 	if err != nil {
 		t.Error(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	dir := t.TempDir()
+
+	cmd := exec.CommandContext(ctx, "buf", "mod", "init")
+	cmd.Dir = dir
+	if err := cmd.Run(); err != nil {
+		t.Error(err)
+	}
+	const fn = "x.proto"
+	if err := os.WriteFile(filepath.Join(dir, fn), buf.Bytes(), 0440); err != nil {
+		t.Fatal(err)
+	}
+	cmd = exec.CommandContext(ctx, "buf", "lint")
+	cmd.Dir = dir
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err = cmd.Run(); err != nil {
+		t.Error(err)
+	}
+	cmd = exec.CommandContext(ctx, "buf", "-v", "build", "--path", fn)
+	cmd.Dir = filepath.Dir(fn)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatal(fmt.Errorf("%q at %q: %w", cmd.Args, dir, err))
 	}
 }
 
