@@ -37,6 +37,20 @@ func init() {
 	dump.IgnoreUnexported = true
 	dump.OmitZero = true
 }
+func testFuncs(t *testing.T, funcs []Function) {
+	t.Log("funcs", dump.Sdump(funcs))
+	var buf bytes.Buffer
+	seen := make(map[string]struct{})
+	for _, f := range funcs {
+		buf.Reset()
+		for _, dir := range []bool{false, true} {
+
+			if err := f.saveProtobufDir(&buf, seen, dir); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+}
 
 func TestReadDB(t *testing.T) {
 	slog.SetDefault(slog.New(slog.HandlerOptions{Level: slog.LevelDebug}.
@@ -119,7 +133,7 @@ END;`,
 		if err != nil {
 			t.Fatal(err)
 		}
-		t.Log("funcs", dump.Sdump(funcs))
+		testFuncs(t, funcs)
 		if err := renameio.WriteFile(
 			testFn,
 			txtar.Format(&txtar.Archive{Files: files}),
@@ -161,8 +175,7 @@ func TestParseCSV(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Log("funcs", dump.Sdump(funcs))
-
+	testFuncs(t, funcs)
 }
 func qryArgsString(qry string, args []any) string {
 	b, _ := json.Marshal(args)

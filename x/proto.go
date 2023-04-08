@@ -413,7 +413,7 @@ func (arg *Argument) goType() (typName string, err error) {
 		case "BFILE":
 			return "ora.Bfile", nil
 		default:
-			return "", fmt.Errorf("%v: %w", arg, UnknownSimpleType)
+			return "", fmt.Errorf("%#v: %w", arg, UnknownSimpleType)
 		}
 	}
 	typName = arg.Type.Name
