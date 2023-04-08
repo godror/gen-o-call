@@ -40,15 +40,10 @@ func init() {
 func testFuncs(t *testing.T, funcs []Function) {
 	t.Log("funcs", dump.Sdump(funcs))
 	var buf bytes.Buffer
-	seen := make(map[string]struct{})
-	for _, f := range funcs {
-		buf.Reset()
-		for _, dir := range []bool{false, true} {
-
-			if err := f.saveProtobufDir(&buf, seen, dir); err != nil {
-				t.Error(err)
-			}
-		}
+	err := SaveProtobuf(&buf, funcs, "DB")
+	t.Log(buf.String())
+	if err != nil {
+		t.Error(err)
 	}
 }
 
@@ -156,6 +151,9 @@ func TestParseCSV(t *testing.T) {
 	}
 	qrys := make(map[string][][]any, len(ar.Files))
 	for _, f := range ar.Files {
+		if _, ok := qrys[f.Name]; ok {
+			continue
+		}
 		dec := json.NewDecoder(bytes.NewReader(f.Data))
 		for {
 			var row []any
@@ -243,6 +241,13 @@ func (rows *testRows) Next() bool {
 	return true
 }
 func (rows *testRows) Scan(args ...any) error {
+	var lastDid string
+	defer func() {
+		if r := recover(); r != nil {
+			panic(lastDid)
+		}
+	}()
+
 	if rows.err != nil {
 		return rows.err
 	}
@@ -284,7 +289,7 @@ func (rows *testRows) Scan(args ...any) error {
 				continue
 			}
 		}
-		slog.Debug("Set", "from", fmt.Sprintf("%[1]T %#[1]v", v.Interface()), "to", fmt.Sprintf("%[1]T %#[1]v", a))
+		lastDid = fmt.Sprintf("Set from %[1]T %#[1]v to %[2]T %#[2]v", v.Interface(), a)
 		reflect.ValueOf(a).Elem().Set(v)
 	}
 	return nil

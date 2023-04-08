@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"golang.org/x/exp/slog"
 )
+
+var _ = slog.Info
 
 func (f Function) FullName() string {
 	nm := strings.ToLower(f.Name)
@@ -111,8 +114,10 @@ const (
 )
 
 type Attribute struct {
-	Name, AbsType, goTypeName string
-	Type                      ObjectOrScalar
+	Name       string
+	AbsType    string `json:",omitempty"`
+	goTypeName string
+	Type       ObjectOrScalar
 }
 
 func (a Attribute) IsScalar() bool      { return a.Type.IsScalar() }
@@ -151,6 +156,28 @@ type Scalar struct {
 	DataType                 string
 	Length, Precision, Scale sql.NullInt32
 }
+
+func (s Scalar) MarshalJSON() ([]byte, error) {
+	buf := Buffers.Get()
+	defer Buffers.Put(buf)
+	buf.WriteString(`{"DataType":`)
+	var b []byte
+	for _, ni := range []struct {
+		nm string
+		*sql.NullInt32
+	}{
+		{"Length", &s.Length}, {"Precision", &s.Precision}, {"Scale", &s.Scale},
+	} {
+		if ni.Valid {
+			buf.WriteString(`,"` + ni.nm + `":`)
+			b = strconv.AppendInt(b[:0], int64(ni.Int32), 10)
+			buf.Write(b)
+		}
+	}
+	buf.WriteString(`}`)
+	return buf.Bytes(), nil
+}
+
 type Object struct {
 	CollectionOf *ObjectOrScalar
 	Triplet
@@ -239,16 +266,17 @@ func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 			} else {
 				arg.AbsType = "NUMBER"
 			}
-		case "PLS_INTEGER", "BINARY_INTEGER":
+		case "PL/SQL PLS INTEGER", "PLS_INTEGER", "BINARY_INTEGER":
 			arg.AbsType = "INTEGER(10)"
 		}
+		//slog.Debug("fun arg", "arg", arg)
 		if old.Owner == act.Owner && old.Package == act.Package && old.Name == act.Name {
 			old.Args = append(old.Args, arg)
 		} else {
+			act.Args = append(act.Args, arg)
 			if old.Name != "" {
 				funcs = append(funcs, old)
 			}
-			act.Args = append(act.Args, arg)
 			old = act
 		}
 	}
@@ -257,16 +285,18 @@ func (db *DB) ReadPackage(ctx context.Context, pkg string) ([]Function, error) {
 		funcs = append(funcs, old)
 	}
 
-	for _, f := range funcs {
+	for i, f := range funcs {
 		if len(f.Args) != 0 && f.Args[0].Name == "" {
 			f.Returns = &f.Args[0].Attribute
 			f.Args = f.Args[1:]
+			funcs[i] = f
+			//slog.Debug("moved return to Return", "args", len(f.Args), "fun", f.Name, "args[0].Name", f.Args[0].Name)
 		}
 	}
 	return funcs, rows.Err()
 }
 func (db *DB) ReadObject(ctx context.Context, name Triplet) (*Object, error) {
-	slog.Debug("ReadObject", "obj", name)
+	//slog.Debug("ReadObject", "obj", name)
 
 	db.mu.Lock()
 	obj := db.objCache[name]
@@ -286,7 +316,7 @@ func (db *DB) ReadObject(ctx context.Context, name Triplet) (*Object, error) {
 	); err != nil {
 		return nil, fmt.Errorf("%s [%q, %q, %q]: %w", qry, obj.Owner, obj.Package, obj.Name, err)
 	}
-	slog.Debug("IsCollection", "typ", typ, "n", n)
+	//slog.Debug("IsCollection", "typ", typ, "n", n)
 	if n != 0 {
 		obj.Attributes = make([]Attribute, 0, int(n))
 		const qry = `SELECT attr_name, 

@@ -6,6 +6,7 @@ package x
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,13 +14,15 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"golang.org/x/exp/slog"
 )
 
 //go:generate sh ./download-protoc.sh
 
 // build: protoc --go_out=plugins=grpc:. my.proto
 
-var UnknownSimpleType = errors.New("unknown simple type")
+var UnknownScalarType = errors.New("unknown scalar type")
 
 func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 	var err error
@@ -89,7 +92,7 @@ func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out b
 	}
 	args := make([]Argument, 0, len(f.Args)+1)
 	for _, arg := range f.Args {
-		if arg.Direction&dirmap > 0 {
+		if arg.Direction&dirmap != 0 && arg.Name != "" {
 			args = append(args, arg)
 		}
 	}
@@ -97,6 +100,7 @@ func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out b
 	if out && f.Returns != nil {
 		args = append(args, Argument{Attribute: *f.Returns})
 	}
+	slog.Info("saveProtobufDir", "fun", f.Name, "dir", dirmap, "args", len(args), "funArgs", len(f.Args))
 
 	nm := f.Name
 	if f.Alias != "" {
@@ -112,6 +116,9 @@ var dot2D = strings.NewReplacer(".", "__")
 func (t Triplet) ProtoName(dirname string) string {
 	var buf strings.Builder
 	for _, nm := range []string{t.Owner, t.Package, t.Name, dirname} {
+		if nm == "" {
+			continue
+		}
 		if buf.Len() != 0 {
 			buf.WriteString("__")
 		}
@@ -132,6 +139,10 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 
 	buf := Buffers.Get()
 	defer Buffers.Put(buf)
+	{
+		b, _ := json.Marshal(args)
+		fmt.Fprintf(w, "// %s.args=[%d] %s\n", msgName, len(args), string(b))
+	}
 	for i, arg := range args {
 		var rule string
 		if arg.Type.IsCollection {
@@ -141,19 +152,27 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 			arg.Name = replHidden(arg.Name)
 		}
 		aName := arg.Name
+		if aName == "" {
+			aName = "ret"
+		}
 
-		if o := arg.Type.Object; arg.Type.IsObject {
+		if arg.Type.IsObject && !arg.Type.IsCollection || arg.Type.IsCollection && arg.Type.CollectionOf.IsObject {
+			var o Object
+			if arg.Type.IsCollection && arg.Type.CollectionOf.IsObject {
+				o = arg.Type.CollectionOf.Object
+			} else {
+				o = arg.Type.Object
+			}
 			subArgs := make([]Argument, len(o.Attributes))
 			for i, v := range o.Attributes {
 				subArgs[i] = Argument{Attribute: v, Direction: arg.Direction}
 			}
-			subName :=
-				o.Triplet.ProtoName("")
+			subName := o.Triplet.ProtoName("")
 			if err := protoWriteMessageTyp(buf, subName, seen, D, subArgs); err != nil {
 				return err
 			}
 
-			fmt.Fprintf(w, "\t%s%s %s = %d;\n", rule, aName, subName, i+1)
+			fmt.Fprintf(w, "\t%s%s %s = %d; //b\n", rule, aName, subName, i+1)
 			continue
 		}
 
@@ -174,11 +193,11 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 			optS = " " + s
 		}
 		if !arg.Type.IsCollection {
-			fmt.Fprintf(w, "%s\t// %s\n\t%s%s %s = %d%s;\n", asComment(D.Map[aName], "\t"), arg.AbsType, rule, typ, aName, i+1, optS)
+			fmt.Fprintf(w, "%s\t// %s\n\t%s%s %s = %d%s; //b\n", asComment(D.Map[aName], "\t"), arg.AbsType, rule, typ, aName, i+1, optS)
 			continue
 		}
 
-		fmt.Fprintf(w, "\t%s%s %s = %d%s;\n", rule, CamelCase(typ), aName, i+1, optS)
+		fmt.Fprintf(w, "\t%s%s %s = %d%s; //c\n", rule, typ, aName, i+1, optS)
 	}
 	io.WriteString(w, "}\n")
 	w.Write(buf.Bytes())
@@ -335,6 +354,7 @@ func (f Function) getStructName(out, withPackage bool) string {
 	return capitalize(f.Package + "__" + nm + "__" + dirname)
 }
 
+var SBuffers = newSBufPool()
 var Buffers = newBufPool(1 << 16)
 
 type bufPool struct {
@@ -348,6 +368,24 @@ func (bp *bufPool) Get() *bytes.Buffer {
 	return bp.Pool.Get().(*bytes.Buffer)
 }
 func (bp *bufPool) Put(b *bytes.Buffer) {
+	if b == nil {
+		return
+	}
+	b.Reset()
+	bp.Pool.Put(b)
+}
+
+type sbufPool struct {
+	sync.Pool
+}
+
+func newSBufPool() *sbufPool {
+	return &sbufPool{sync.Pool{New: func() interface{} { return &strings.Builder{} }}}
+}
+func (bp *sbufPool) Get() *strings.Builder {
+	return bp.Pool.Get().(*strings.Builder)
+}
+func (bp *sbufPool) Put(b *strings.Builder) {
 	if b == nil {
 		return
 	}
@@ -375,7 +413,11 @@ func (arg *Argument) goType() (typName string, err error) {
 		arg.goTypeName = typName
 	}()
 	if arg.Type.IsScalar() {
-		switch arg.Type.Name {
+		typ := arg.Type.PlsType
+		if typ == "" {
+			typ = arg.Type.Name
+		}
+		switch typ {
 		case "CHAR", "VARCHAR2", "ROWID":
 			if !arg.Type.IsCollection && arg.IsOutput() {
 				//return "*string", nil
@@ -391,7 +433,7 @@ func (arg *Argument) goType() (typName string, err error) {
 				return "*int64", nil
 			}
 			return "int64", nil
-		case "PLS_INTEGER", "BINARY_INTEGER":
+		case "PL/SQL PLS INTEGER", "PLS_INTEGER", "BINARY_INTEGER":
 			if !arg.Type.IsCollection && arg.IsOutput() {
 				//return "*int32", nil
 				return "int32", nil
@@ -413,7 +455,7 @@ func (arg *Argument) goType() (typName string, err error) {
 		case "BFILE":
 			return "ora.Bfile", nil
 		default:
-			return "", fmt.Errorf("%#v: %w", arg, UnknownSimpleType)
+			return "", fmt.Errorf("%#v: %w", arg, UnknownScalarType)
 		}
 	}
 	typName = arg.Type.Name
