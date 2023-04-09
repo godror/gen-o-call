@@ -55,17 +55,32 @@ func testFuncs(t *testing.T, funcs []Function) {
 	if err := cmd.Run(); err != nil {
 		t.Error(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "buf.gen.yaml"),
+		[]byte(`version: v1
+plugins:
+  - plugin: buf.build/protocolbuffers/go
+    out: .
+    opt:
+      - paths=source_relative
+  - plugin: buf.build/grpc/go
+    out: .
+    opt:
+      - paths=source_relative
+  - plugin: go-vtproto
+    out: .
+    opt:
+      - paths=source_relative
+`),
+		0640,
+	); err != nil {
+		t.Error(err)
+	}
+
 	const fn = "x.proto"
 	if err := os.WriteFile(filepath.Join(dir, fn), buf.Bytes(), 0440); err != nil {
 		t.Fatal(err)
 	}
-	cmd = exec.CommandContext(ctx, "buf", "lint")
-	cmd.Dir = dir
-	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
-	if err = cmd.Run(); err != nil {
-		t.Error(err)
-	}
-	cmd = exec.CommandContext(ctx, "buf", "-v", "build", "--path", fn)
+	cmd = exec.CommandContext(ctx, "buf", "-v", "build")
 	cmd.Dir = filepath.Dir(fn)
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	if err := cmd.Run(); err != nil {

@@ -33,8 +33,10 @@ func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 	if pkg != "" {
 		fmt.Fprintf(w, "package %s;\n", pkg)
 	}
-	seen := make(map[string]struct{}, 16)
+	io.WriteString(w, `import "google/protobuf/timestamp.proto";`+"\n")
+	fmt.Fprintf(w, `option go_package = %q;`+"\n", pkg)
 
+	seen := make(map[string]struct{}, 16)
 	services := make([]string, 0, len(functions))
 
 	for _, fun := range functions {
@@ -86,9 +88,9 @@ func (f Function) SaveProtobuf(dst io.Writer, seen map[string]struct{}) error {
 	return err
 }
 func (f Function) saveProtobufDir(dst io.Writer, seen map[string]struct{}, out bool) error {
-	dirmap, dirname := DirIn, "input"
+	dirmap, dirname := DirIn, "Request"
 	if out {
-		dirmap, dirname = DirOut, "output"
+		dirmap, dirname = DirOut, "Response"
 	}
 	args := make([]Argument, 0, len(f.Args)+1)
 	for _, arg := range f.Args {
@@ -172,7 +174,7 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 				return err
 			}
 
-			fmt.Fprintf(w, "\t%s%s %s = %d; //b\n", rule, aName, subName, i+1)
+			fmt.Fprintf(w, "\t%s%s %s = %d; //b\n", rule, subName, aName, i+1)
 			continue
 		}
 
@@ -216,16 +218,14 @@ func protoType(got, aName, absType string) (string, protoOptions) {
 		return "double", nil
 
 	case "godror.number":
-		return "string", protoOptions{
-			"gogoproto.jsontag": aName + ",omitempty",
-		}
+		return "string", nil //protoOptions{ "gogoproto.jsontag": aName + ",omitempty", }
 
 	case "custom.date", "time.time":
-		return "google.protobuf.Timestamp", protoOptions{
+		return "google.protobuf.Timestamp", nil /*protoOptions{
 			//"gogoproto.stdtime":    true,
 			"gogoproto.customtype": "github.com/godror/gen-o-call/custom.DateTime",
 			"gogoproto.moretags":   `xml:",omitempty"`,
-		}
+		}*/
 	case "n":
 		return "string", nil
 	case "raw":
@@ -343,15 +343,15 @@ func (f Function) getPlsqlConstName() string {
 }
 
 func (f Function) getStructName(out, withPackage bool) string {
-	dirname := "input"
+	dirname := "Request"
 	if out {
-		dirname = "output"
+		dirname = "Response"
 	}
 	nm := f.AliasedName()
 	if !withPackage {
 		return nm + "__" + dirname
 	}
-	return capitalize(f.Package + "__" + nm + "__" + dirname)
+	return capitalize(f.Package+"__"+nm) + "__" + dirname
 }
 
 var SBuffers = newSBufPool()
