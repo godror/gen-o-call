@@ -1,5 +1,5 @@
-// Copyright 2019, 2034 Tamás Gulácsi. All rights reserved.
-
+// Copyright 2019, 2023 Tamás Gulácsi. All rights reserved.
+//
 // SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
 
 package x
@@ -10,7 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
+	//"regexp"
 	"strings"
 	"sync"
 	"unicode"
@@ -22,7 +22,7 @@ import (
 // go:generate go install github.com/bufbuild/buf/cmd/...@latest
 // build: protoc --go_out=plugins=grpc:. my.proto
 
-var UnknownScalarType = errors.New("unknown scalar type")
+var ErrUnknownScalarType = errors.New("unknown scalar type")
 
 func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 	var err error
@@ -264,7 +264,7 @@ func (opts protoOptions) String() string {
 	return buf.String()
 }
 
-func mkRecTypName(name string) string { return strings.ToLower(name) + "_rt" }
+//func mkRecTypName(name string) string { return strings.ToLower(name) + "_rt" }
 
 func asComment(s, prefix string) string {
 	return "\n" + prefix + "// " + strings.Replace(s, "\n", "\n"+prefix+"// ", -1) + "\n"
@@ -337,10 +337,11 @@ func CamelCase(text string) string {
 		text,
 	)
 }
-func (f Function) getPlsqlConstName() string {
+
+/*func (f Function) getPlsqlConstName() string {
 	nm := f.AliasedName()
 	return capitalize(f.Package + "__" + nm + "__plsql")
-}
+} */
 
 func (f Function) getStructName(out, withPackage bool) string {
 	dirname := "Request"
@@ -393,7 +394,7 @@ func (bp *sbufPool) Put(b *strings.Builder) {
 	bp.Pool.Put(b)
 }
 
-var rIdentifier = regexp.MustCompile(`:([0-9a-zA-Z][a-zA-Z0-9_]*)`)
+// var rIdentifier = regexp.MustCompile(`:([0-9a-zA-Z][a-zA-Z0-9_]*)`)
 
 func (arg *Argument) goType() (typName string, err error) {
 	defer func() {
@@ -455,7 +456,7 @@ func (arg *Argument) goType() (typName string, err error) {
 		case "BFILE":
 			return "ora.Bfile", nil
 		default:
-			return "", fmt.Errorf("%#v: %w", arg, UnknownScalarType)
+			return "", fmt.Errorf("%#v: %w", arg, ErrUnknownScalarType)
 		}
 	}
 	typName = arg.Type.Name

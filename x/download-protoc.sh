@@ -1,1 +1,0 @@
-../lib/download-protoc.sh

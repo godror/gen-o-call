@@ -1,3 +1,7 @@
+// Copyright 2023 Tamás Gulácsi. All rights reserved.
+//
+// SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
+
 package x
 
 import (

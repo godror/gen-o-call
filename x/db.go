@@ -1,3 +1,7 @@
+// Copyright 2023 Tamás Gulácsi. All rights reserved.
+//
+// SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
+
 package x
 
 import (
@@ -147,9 +151,9 @@ type Function struct {
 	Replacement       *Function  `json:",omitempty"`
 	ReplacementIsJSON bool       `json:",omitempty"`
 	LastDDL           time.Time  `json:",omitempty"`
-	handle            []string
-	Documentation     string `json:",omitempty"`
-	maxTableSize      int
+	//handle            []string
+	Documentation string `json:",omitempty"`
+	//maxTableSize  int
 }
 
 type Scalar struct {
