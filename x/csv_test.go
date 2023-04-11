@@ -90,6 +90,12 @@ plugins:
 	if err := cmd.Run(); err != nil {
 		t.Fatal(fmt.Errorf("%q at %q: %w", cmd.Args, dir, err))
 	}
+
+	for _, f := range funcs {
+		pls, callFun := f.PlsqlBlock("")
+		t.Log(pls)
+		t.Log(callFun)
+	}
 }
 
 func TestReadDB(t *testing.T) {

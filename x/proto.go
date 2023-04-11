@@ -20,7 +20,7 @@ import (
 
 // go:generate sh ./download-protoc.sh
 // go:generate go install github.com/bufbuild/buf/cmd/...@latest
-// build: protoc --go_out=plugins=grpc:. my.proto
+// build: buf mod init; buf build
 
 var ErrUnknownScalarType = errors.New("unknown scalar type")
 
@@ -338,11 +338,10 @@ func CamelCase(text string) string {
 	)
 }
 
-/*func (f Function) getPlsqlConstName() string {
+func (f Function) getPlsqlConstName() string {
 	nm := f.AliasedName()
 	return capitalize(f.Package + "__" + nm + "__plsql")
-} */
-
+}
 func (f Function) getStructName(out, withPackage bool) string {
 	dirname := "Request"
 	if out {
@@ -393,8 +392,6 @@ func (bp *sbufPool) Put(b *strings.Builder) {
 	b.Reset()
 	bp.Pool.Put(b)
 }
-
-// var rIdentifier = regexp.MustCompile(`:([0-9a-zA-Z][a-zA-Z0-9_]*)`)
 
 func (arg *Argument) goType() (typName string, err error) {
 	defer func() {

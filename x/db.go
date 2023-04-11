@@ -151,9 +151,9 @@ type Function struct {
 	Replacement       *Function  `json:",omitempty"`
 	ReplacementIsJSON bool       `json:",omitempty"`
 	LastDDL           time.Time  `json:",omitempty"`
-	//handle            []string
-	Documentation string `json:",omitempty"`
-	//maxTableSize  int
+	handle            []string
+	Documentation     string `json:",omitempty"`
+	maxTableSize      int
 }
 
 type Scalar struct {
