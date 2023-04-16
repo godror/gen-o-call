@@ -498,6 +498,49 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 		}
 
 		// Object, maybe Collection
+		{
+			if arg.IsInput() {
+				convIn = append(convIn,
+					fmt.Sprintf("typName := %q", arg.Type.Name),
+					`
+				ot, err := conn.GetObjectType(typName)
+				if err != nil {
+					return fmt.Errorf("GetObjectType %q: %w", typName, err)
+				}
+				`,
+				)
+				aname := CamelCase(arg.Name)
+
+				if arg.Type.CollectionOf != nil {
+					convIn = append(convIn, `
+					coll, err := ot.NewCollection()
+					if err != nil {
+						ot.Close()
+						return fmt.Errorf("%q.NewObject: %w", typName, err)
+					}
+					for i, elt := range input.`+aname+` {
+						if err := coll.Append(elt); err != nil {
+							ot.Close()
+							return fmt.Errorf("%s.Append: %w", typName, err)
+						}
+					}
+				`)
+				} else {
+					convIn = append(convIn, `
+					obj, err := ot.NewObject()
+					if err != nil {
+						close()
+						return fmt.Errorf("%q.NewObject: %w", typName, err)
+					}
+					if err = obj.Set(input.`+aname+`); err != nil {
+						ot.Close()
+						return fmt.Errorf("%s.Set: %w", typName, err)
+					}
+					`)
+				}
+			}
+		}
+
 		switch arg.Flavor {
 
 		case FLAVOR_RECORD:
@@ -520,7 +563,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 			//aname := capitalize(replHidden(arg.Name))
 			if arg.IsOutput() {
 				var got string
-				if got, err = arg.goType(false); err != nil {
+				if got, err = arg.goType(); err != nil {
 					return
 				}
 				if arg.IsInput() {
@@ -531,7 +574,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						aname, aname, aname))
 				} else {
 					var got string
-					if got, err = arg.goType(false); err != nil {
+					if got, err = arg.goType(); err != nil {
 						return
 					}
 					// yes, convIn - getConvRec uses this!
@@ -620,7 +663,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 					//aname := capitalize(replHidden(arg.Name))
 					if arg.IsOutput() {
 						var tgot string
-						if tgot, err = arg.TableOf.goType(true); err != nil {
+						if tgot, err = arg.TableOf.goType(); err != nil {
 							return
 						}
 						st := withPb(CamelCase(tgot))
@@ -754,7 +797,7 @@ func (arg Argument) getConvSimple(
 		in, _ := arg.ToOra(paramName, "input."+name, arg.Direction)
 		convIn = append(convIn, in+"  // gcs4i")
 	} else {
-		got, err := arg.goType(false)
+		got, err := arg.goType()
 		if err != nil {
 			panic(err)
 		}
@@ -787,7 +830,7 @@ func (arg Argument) getConvSimpleTable(
 	tableSize int,
 ) ([]string, []string) {
 	if arg.IsOutput() {
-		got, err := arg.goType(true)
+		got, err := arg.goType()
 		if err != nil {
 			panic(err)
 		}
@@ -839,7 +882,7 @@ func (arg Argument) getConvSimpleTable(
 			"output."+name,
 			arg.Direction)
 		convIn = append(convIn,
-			//fmt.Sprintf(`if cap(input.%s) == 0 { input.%s = append(input.%s, make(%s, 1)...)[:0] }`, name, name, name, arg.goType(true)[1:]),
+			//fmt.Sprintf(`if cap(input.%s) == 0 { input.%s = append(input.%s, make(%s, 1)...)[:0] }`, name, name, name, arg.goType()[1:]),
 			fmt.Sprintf(`// in=%q varName=%q`, in, varName))
 		if got == "[]godror.Number" { // don't copy, hack
 			convIn = append(convIn,
@@ -855,7 +898,7 @@ func (arg Argument) getConvSimpleTable(
 			arg.Direction)
 		convIn = append(convIn,
 			fmt.Sprintf(`// in=%q varName=%q`, in, varName))
-		if got, _ := arg.goType(true); got == "[]godror.Number" {
+		if got, _ := arg.goType(); got == "[]godror.Number" {
 			convIn = append(convIn,
 				fmt.Sprintf(`if len(input.%s) == 0 { %s = []godror.Number{} } else {
 			%s = *custom.NumbersFromStrings(&input.%s) // gcst2
@@ -874,7 +917,7 @@ func (arg Argument) getConvRefCursor(
 	name, paramName string,
 	tableSize int,
 ) ([]string, []string) {
-	got, err := arg.goType(true)
+	got, err := arg.goType()
 	if err != nil {
 		panic(err)
 	}
@@ -920,7 +963,7 @@ func (arg Argument) getFromRset(rsetRow string) string {
 	buf := Buffers.Get()
 	defer Buffers.Put(buf)
 
-	got, err := arg.goType(true)
+	got, err := arg.goType()
 	if err != nil {
 		panic(err)
 	}
@@ -931,7 +974,7 @@ func (arg Argument) getFromRset(rsetRow string) string {
 	fmt.Fprintf(buf, "%s{\n", withPb(GoT))
 	for i, a := range arg.TableOf.RecordOf {
 		a := a
-		got, err = a.Argument.goType(true)
+		got, err = a.Argument.goType()
 		if err != nil {
 			panic(err)
 		}
@@ -1004,7 +1047,7 @@ func (arg Argument) getConvRec(
 	if arg.IsOutput() {
 		too, varName := arg.ToOra(paramName, "&output."+name, arg.Direction)
 		if arg.TableOf != nil {
-			st, err := arg.TableOf.goType(true)
+			st, err := arg.TableOf.goType()
 			if err != nil {
 				panic(err)
 			}
@@ -1044,7 +1087,7 @@ func (arg Argument) getConvTableRec(
 	parent Argument,
 ) ([]string, []string) {
 	absName := "x__" + name[0] + "__" + name[1]
-	typ, err := arg.goType(true)
+	typ, err := arg.goType()
 	if err != nil {
 		panic(err)
 	}
@@ -1084,7 +1127,7 @@ func (arg Argument) getConvTableRec(
 					absName, oraTyp, tableSize,
 					paramName, absName))
 		}
-		got, err := parent.goType(true)
+		got, err := parent.goType()
 		if err != nil {
 			panic(err)
 		}
