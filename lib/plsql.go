@@ -29,7 +29,7 @@ const batchSize = 128
 func (fun Function) PlsqlBlock(checkName string) (plsql, callFun string) {
 	decls, pre, call, post, convIn, convOut, err := fun.prepareCall()
 	if err != nil {
-		Log("msg", "error preparing", "function", fun, "error", err)
+		logger.Error("error preparing", "function", fun, "error", err)
 		panic(errors.Errorf("%s: %w", fun.FullName(), err))
 	}
 	fn := fun.AliasedName()
@@ -127,7 +127,7 @@ func (fun Function) PlsqlBlock(checkName string) (plsql, callFun string) {
 
 	i := strings.Index(call, fun.RealName())
 	if i < 0 {
-		Log("msg", "not found", "name", fun.RealName(), "in", call)
+		logger.Error("not found", "name", fun.RealName(), "in", call)
 	}
 	j := i + strings.Index(call[i:], ")") + 1
 	//Log("msg","PlsqlBlock", "i", i, "j", j, "call", call)
@@ -255,7 +255,7 @@ func demap(plsql, callFun string) (string, string) {
 					}
 					arr := paramsMap[key]
 					if len(arr) == 0 {
-						Log("msg", "paramsIdx", "key", key, "val", arr, "map", paramsMap)
+						logger.Warn("paramsIdx", "key", key, "val", arr, "map", paramsMap)
 					}
 					i = arr[0]
 					if len(arr) > 1 {
@@ -320,7 +320,7 @@ func demap(plsql, callFun string) (string, string) {
 		old := prev[idx]
 		if old == "" {
 			fmt.Fprintf(callBuf, "params[%d] = params[%d]  // %s\n", v.New, v.Old, v.Name)
-			Log("err", fmt.Errorf("cannot find %q in %+v", idx, prev))
+			logger.Warn(fmt.Sprintf("cannot find %q in %+v", idx, prev))
 		} else {
 			if !strings.HasPrefix(old, "sql.Out{") {
 				if old[0] != '&' {
@@ -506,7 +506,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 		case FLAVOR_TABLE:
 			if arg.Type == "REF CURSOR" {
 				if arg.IsInput() {
-					Log("msg", "cannot use IN cursor variables", "arg", arg)
+					logger.Error("cannot use IN cursor variables", "arg", arg)
 					panic(fmt.Sprintf("cannot use IN cursor variables (%v)", arg))
 				}
 				name := (CamelCase(arg.Name))
@@ -659,12 +659,12 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						}
 					}
 				default:
-					Log("msg", "Only table of simple or record types are allowed (no table of table!)", "function", fun.FullName(), "arg", arg.Name)
+					logger.Error("Only table of simple or record types are allowed (no table of table!)", "function", fun.FullName(), "arg", arg.Name)
 					panic(errors.Errorf("Only table of simple or record types are allowed (no table of table!) - %s(%v)", fun.FullName(), arg.Name))
 				}
 			}
 		default:
-			Log("msg", "unkown flavor", "flavor", arg.Flavor)
+			logger.Error("unkown flavor", "flavor", arg.Flavor)
 			panic(errors.Errorf("unknown flavor %s(%v)", fun.FullName(), arg.Name))
 		}
 	}
@@ -893,48 +893,48 @@ func (arg Argument) getFromRset(rsetRow string) string {
 }
 
 /*
-func getOutConvTSwitch(name, pTyp string) string {
-	parse := ""
-	if strings.HasPrefix(pTyp, "int") {
-		bits := "32"
-		if len(pTyp) == 5 {
-			bits = pTyp[3:5]
-		}
-		parse = "ParseInt(xi, 10, " + bits + ")"
-	} else if strings.HasPrefix(pTyp, "float") {
-		bits := pTyp[5:7]
-		parse = "ParseFloat(xi, " + bits + ")"
-	}
-	if parse != "" {
-		return fmt.Sprintf(`
-			var y `+pTyp+`
-			err = nil
-			switch xi := x.(type) {
-				case int: y = `+pTyp+`(xi)
-				case int8: y = `+pTyp+`(xi)
-				case int16: y = `+pTyp+`(xi)
-				case int32: y = `+pTyp+`(xi)
-				case int64: y = `+pTyp+`(xi)
-				case float32: y = `+pTyp+`(xi)
-				case float64: y = `+pTyp+`(xi)
-				case string:
-					//Log("converting", %q,  "to", `+pTyp+`", "xi", xi)
-					z, e := strconv.`+parse+`
-					y, err = `+pTyp+`(z), e
-				default:
-					err = fmt.Errorf("out parameter %s is bad type: awaited %s, got %%T", x)
+	func getOutConvTSwitch(name, pTyp string) string {
+		parse := ""
+		if strings.HasPrefix(pTyp, "int") {
+			bits := "32"
+			if len(pTyp) == 5 {
+				bits = pTyp[3:5]
 			}
-			if err != nil {
-				return
-			}`, name, pTyp)
-	}
-	return fmt.Sprintf(`
-				y, ok := x.(%s)
-				if !ok {
-					err = fmt.Errorf("out parameter %s is bad type: awaited %s, got %%T", x)
+			parse = "ParseInt(xi, 10, " + bits + ")"
+		} else if strings.HasPrefix(pTyp, "float") {
+			bits := pTyp[5:7]
+			parse = "ParseFloat(xi, " + bits + ")"
+		}
+		if parse != "" {
+			return fmt.Sprintf(`
+				var y `+pTyp+`
+				err = nil
+				switch xi := x.(type) {
+					case int: y = `+pTyp+`(xi)
+					case int8: y = `+pTyp+`(xi)
+					case int16: y = `+pTyp+`(xi)
+					case int32: y = `+pTyp+`(xi)
+					case int64: y = `+pTyp+`(xi)
+					case float32: y = `+pTyp+`(xi)
+					case float64: y = `+pTyp+`(xi)
+					case string:
+						//Log("converting", %q,  "to", `+pTyp+`", "xi", xi)
+						z, e := strconv.`+parse+`
+						y, err = `+pTyp+`(z), e
+					default:
+						err = fmt.Errorf("out parameter %s is bad type: awaited %s, got %%T", x)
+				}
+				if err != nil {
 					return
-				}`, pTyp, name, pTyp)
-}
+				}`, name, pTyp)
+		}
+		return fmt.Sprintf(`
+					y, ok := x.(%s)
+					if !ok {
+						err = fmt.Errorf("out parameter %s is bad type: awaited %s, got %%T", x)
+						return
+					}`, pTyp, name, pTyp)
+	}
 */
 func (arg Argument) getConvRec(
 	convIn, convOut []string,

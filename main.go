@@ -20,6 +20,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -36,11 +37,9 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/go-kit/kit/log"
+	"github.com/UNO-SOFT/zlog/v2"
 	custom "github.com/godror/gen-o-call/custom"
 	genocall "github.com/godror/gen-o-call/lib"
-	"github.com/tgulacsi/go/loghlp/kitloghlp"
-	errors "golang.org/x/xerrors"
 
 	// for Oracle-specific drivers
 	godror "github.com/godror/godror"
@@ -50,14 +49,15 @@ import (
 // Should install protobuf-compiler to use it, like
 // curl -L https://github.com/google/protobuf/releases/download/v3.0.0-beta-2/protoc-3.0.0-beta-2-linux-x86_64.zip -o /tmp/protoc-3.0.0-beta-2-linux-x86_64.zip && unzip -p /tmp/protoc-3.0.0-beta-2-linux-x86_64.zip protoc >$HOME/bin/protoc
 
-var logger = kitloghlp.New(os.Stderr)
+var verbose zlog.VerboseVar
+var logger = zlog.NewLogger(zlog.MaybeConsoleHandler(&verbose, os.Stderr)).SLog()
 
 var flagConnect *string
 
 func main() {
-	genocall.Log = log.With(logger, "lib", "genocall").Log
+	genocall.SetLogger(logger.WithGroup("genocall"))
 	if err := Main(os.Args[1:]); err != nil {
-		logger.Log("error", fmt.Sprintf("%+v", err))
+		logger.Error("ERROR", "error", err)
 		os.Exit(1)
 	}
 }
@@ -73,10 +73,9 @@ func Main(args []string) error {
 	flagBaseDir := fs.String("base-dir", gopSrc, "base dir for the -pb-out, -db-out flags")
 	flagPbOut := fs.String("pb-out", "", "package import path for the Protocol Buffers files, optionally with the package name, like \"my/pb-pkg:main\"")
 	flagDbOut := fs.String("db-out", "-:main", "package name of the generated functions, optionally with the package name, like \"my/db-pkg:main\"")
-	flagGenerator := fs.String("protoc-gen", "gogofast", "use protoc-gen-<generator>")
 	fs.BoolVar(&genocall.NumberAsString, "number-as-string", false, "add ,string to json tags")
 	fs.BoolVar(&custom.ZeroIsAlmostZero, "zero-is-almost-zero", false, "zero should be just almost zero, to distinguish 0 and non-set field")
-	flagVerbose := fs.Bool("v", false, "verbose logging")
+	fs.Var(&verbose, "v", "verbose logging")
 	flagExcept := fs.String("except", "", "except these functions")
 	flagReplace := fs.String("replace", "", "funcA=>funcB")
 	flagTestOut := fs.Bool("test-out", false, "output test data")
@@ -97,12 +96,10 @@ func Main(args []string) error {
 	pbPath, pbPkg := parsePkgFlag(*flagPbOut)
 	dbPath, dbPkg := parsePkgFlag(*flagDbOut)
 
-	Log := logger.Log
 	pattern := fs.Arg(0)
 	if pattern == "" {
 		pattern = "%"
 	}
-	genocall.Gogo = *flagGenerator != "go"
 
 	ctx, cancel := globalCtx(context.Background())
 	defer cancel()
@@ -122,7 +119,7 @@ func Main(args []string) error {
 	}
 	if *flagExcept != "" {
 		except := strings.FieldsFunc(*flagExcept, func(r rune) bool { return r == ',' || unicode.IsSpace(r) })
-		Log("except", except)
+		logger.Info("funcs", "except", except)
 		filters = append(filters, func(s string) bool {
 			for _, e := range except {
 				if strings.EqualFold(e, s) {
@@ -147,11 +144,11 @@ func Main(args []string) error {
 	} else {
 		db, err := sql.Open("godror", *flagConnect)
 		if err != nil {
-			return errors.Errorf("connect to %s: %w", *flagConnect, err)
+			return fmt.Errorf("connect to %s: %w", *flagConnect, err)
 		}
 		defer db.Close()
-		if *flagVerbose {
-			godror.Log = log.With(logger, "lib", "godror").Log
+		if verbose > 1 {
+			godror.SetLogger(zlog.NewLogger(logger.WithGroup("godror").Handler()).Logr())
 		}
 		tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
 		if err != nil {
@@ -162,7 +159,7 @@ func Main(args []string) error {
 		var annotations []genocall.Annotation
 		functions, annotations, err = genocall.ReadDB(ctx, tx, pattern, filter)
 		if err != nil {
-			return errors.Errorf("read %s: %w", fs.Arg(0), err)
+			return fmt.Errorf("read %s: %w", fs.Arg(0), err)
 		}
 		*flagReplace = strings.TrimSpace(*flagReplace)
 		for _, elt := range strings.FieldsFunc(
@@ -179,7 +176,7 @@ func Main(args []string) error {
 			}
 			annotations = append(annotations, a)
 		}
-		Log("annotations", annotations)
+		logger.Info("read", "annotations", annotations)
 		functions = genocall.ApplyAnnotations(functions, annotations)
 		sort.Slice(functions, func(i, j int) bool { return functions[i].FullName() < functions[j].FullName() })
 
@@ -199,21 +196,21 @@ func Main(args []string) error {
 			fn = dbPkg + ".go"
 		}
 		fn = filepath.Join(*flagBaseDir, dbPath, fn)
-		Log("msg", "Writing generated functions", "file", fn)
+		logger.Info("Writing generated functions", "file", fn)
 		os.MkdirAll(filepath.Dir(fn), 0775)
 		if out, err = os.Create(fn); err != nil {
-			return errors.Errorf("create %s: %w", fn, err)
+			return fmt.Errorf("create %s: %w", fn, err)
 		}
 		testFn := fn[:len(fn)-3] + "_test.go"
 		if testOut, err = os.Create(testFn); err != nil {
-			return errors.Errorf("create %s: %w", testFn, err)
+			return fmt.Errorf("create %s: %w", testFn, err)
 		}
 		defer func() {
 			if err := out.Close(); err != nil {
-				Log("msg", "close", "file", out.Name(), "error", err)
+				logger.Error("close", "file", out.Name(), "error", err)
 			}
 			if err := testOut.Close(); err != nil {
-				Log("msg", "close", "file", testOut.Name(), "error", err)
+				logger.Error("close", "file", testOut.Name(), "error", err)
 			}
 		}()
 	}
@@ -228,7 +225,7 @@ func Main(args []string) error {
 			out, functions,
 			dbPkg, pbPath, false,
 		); err != nil {
-			return errors.Errorf("save functions: %w", err)
+			return fmt.Errorf("save functions: %w", err)
 		}
 		return nil
 	})
@@ -242,7 +239,7 @@ func Main(args []string) error {
 				testOut, functions,
 				dbPkg, pbPath, false,
 			); err != nil {
-				return errors.Errorf("save function tests: %w", err)
+				return fmt.Errorf("save function tests: %w", err)
 			}
 			return nil
 		})
@@ -255,20 +252,20 @@ func Main(args []string) error {
 		}
 		fn = filepath.Join(*flagBaseDir, pbPath, fn)
 		os.MkdirAll(filepath.Dir(fn), 0775)
-		Log("msg", "Writing Protocol Buffers", "file", fn)
+		logger.Info("Writing Protocol Buffers", "file", fn)
 		fh, err := os.Create(fn)
 		if err != nil {
-			return errors.Errorf("create proto: %w", err)
+			return fmt.Errorf("create proto: %w", err)
 		}
 		err = genocall.SaveProtobuf(fh, functions, pbPkg)
 		if closeErr := fh.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
 		if err != nil {
-			return errors.Errorf("SaveProtobuf: %w", err)
+			return fmt.Errorf("SaveProtobuf: %w", err)
 		}
 
-		goOut := *flagGenerator + "_out"
+		goOut := "go_out"
 		cmd := exec.Command(
 			"protoc",
 			"--proto_path="+*flagBaseDir+":.",
@@ -278,7 +275,7 @@ func Main(args []string) error {
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
-			return errors.Errorf("%q: %w", cmd.Args, err)
+			return fmt.Errorf("%q: %w", cmd.Args, err)
 		}
 		return nil
 	})

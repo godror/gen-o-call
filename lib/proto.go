@@ -10,23 +10,25 @@ import (
 	"bytes"
 	"fmt"
 	//"encoding/json"
+	"errors"
 	"io"
 	"strings"
 	"unicode"
 
 	fstructs "github.com/fatih/structs"
-	errors "golang.org/x/xerrors"
+	"golang.org/x/exp/slog"
 )
 
-var SkipMissingTableOf = true
+var (
+	logger *slog.Logger
 
-var Gogo bool
-var NumberAsString bool
+	SkipMissingTableOf = true
 
-//go:generate sh ./download-protoc.sh
-//go:generate go get -u github.com/gogo/protobuf/protoc-gen-gogofast
+	NumberAsString bool
+)
 
-// build: protoc --gogofast_out=plugins=grpc:. my.proto
+func SetLogger(lgr *slog.Logger) { logger = lgr }
+
 // build: protoc --go_out=plugins=grpc:. my.proto
 
 func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
@@ -37,12 +39,6 @@ func SaveProtobuf(dst io.Writer, functions []Function, pkg string) error {
 
 	if pkg != "" {
 		fmt.Fprintf(w, "package %s;\n", pkg)
-	}
-	if Gogo {
-		io.WriteString(w, `
-	import "google/protobuf/timestamp.proto";
-	import "github.com/gogo/protobuf/gogoproto/gogo.proto";
-`)
 	}
 	seen := make(map[string]struct{}, 16)
 
@@ -57,10 +53,10 @@ FunLoop:
 		if err := fun.SaveProtobuf(w, seen); err != nil {
 			if SkipMissingTableOf && (errors.Is(err, ErrMissingTableOf) ||
 				errors.Is(err, UnknownSimpleType)) {
-				Log("msg", "SKIP function, missing TableOf info", "function", fName)
+				logger.Warn("SKIP function, missing TableOf info", "function", fName)
 				continue FunLoop
 			}
-			return errors.Errorf("%s: %w", fun.Name, err)
+			return fmt.Errorf("%s: %w", fun.Name, err)
 		}
 		var streamQual string
 		if fun.HasCursorOut() {
@@ -94,10 +90,10 @@ FunLoop:
 func (f Function) SaveProtobuf(dst io.Writer, seen map[string]struct{}) error {
 	var buf bytes.Buffer
 	if err := f.saveProtobufDir(&buf, seen, false); err != nil {
-		return errors.Errorf("%s: %w", "input", err)
+		return fmt.Errorf("%s: %w", "input", err)
 	}
 	if err := f.saveProtobufDir(&buf, seen, true); err != nil {
-		return errors.Errorf("%s: %w", "output", err)
+		return fmt.Errorf("%s: %w", "output", err)
 	}
 	_, err := dst.Write(buf.Bytes())
 	return err
@@ -132,7 +128,7 @@ var dot2D = strings.NewReplacer(".", "__")
 func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{}, D argDocs, args ...Argument) error {
 	for _, arg := range args {
 		if arg.Flavor == FLAVOR_TABLE && arg.TableOf == nil {
-			return errors.Errorf("no table of data for %s.%s (%v): %w", msgName, arg, arg, ErrMissingTableOf)
+			return fmt.Errorf("no table of data for %s.%s (%v): %w", msgName, arg, arg, ErrMissingTableOf)
 		}
 	}
 
@@ -149,14 +145,14 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 		}
 		if arg.Flavor == FLAVOR_TABLE {
 			if arg.TableOf == nil {
-				return errors.Errorf("no table of data for %s.%s (%v): %w", msgName, arg, arg, ErrMissingTableOf)
+				return fmt.Errorf("no table of data for %s.%s (%v): %w", msgName, arg, arg, ErrMissingTableOf)
 			}
 			rule = "repeated "
 		}
 		aName := arg.Name
 		got, err := arg.goType(false)
 		if err != nil {
-			return errors.Errorf("%s: %w", msgName, err)
+			return fmt.Errorf("%s: %w", msgName, err)
 		}
 		got = strings.TrimPrefix(got, "*")
 		if strings.HasPrefix(got, "[]") {
@@ -195,7 +191,7 @@ func protoWriteMessageTyp(dst io.Writer, msgName string, seen map[string]struct{
 				}
 			}
 			if err = protoWriteMessageTyp(buf, typ, seen, argDocs{Pre: D.Map[aName]}, subArgs...); err != nil {
-				Log("msg", "protoWriteMessageTyp", "error", err)
+				logger.Error("protoWriteMessageTyp", "error", err)
 				return err
 			}
 		}
@@ -287,7 +283,7 @@ func CopyStruct(dest interface{}, src interface{}) error {
 			if snm == dnm || dnm == CamelCase(snm) || CamelCase(dnm) == snm {
 				svalue := svalues[i]
 				if err := df.Set(svalue); err != nil {
-					return errors.Errorf("set %q to %q (%v %T): %w", dnm, snm, svalue, svalue, err)
+					return fmt.Errorf("set %q to %q (%v %T): %w", dnm, snm, svalue, svalue, err)
 				}
 			}
 		}

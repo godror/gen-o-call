@@ -18,8 +18,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	errors "golang.org/x/xerrors"
 )
 
 // UserArgument represents the required info from the user_arguments view
@@ -129,8 +127,8 @@ func OpenCsv(filename string) (*os.File, error) {
 func MustOpenCsv(filename string) *os.File {
 	fh, err := OpenCsv(filename)
 	if err != nil {
-		Log("msg", "MustOpenCsv", "file", filename, "error", err)
-		panic(errors.Errorf("%s: %w", filename, err))
+		logger.Error("MustOpenCsv", "file", filename, "error", err)
+		panic(fmt.Errorf("%s: %w", filename, err))
 	}
 	return fh
 }
@@ -170,7 +168,7 @@ func ReadCsv(r io.Reader) (userArgs []UserArgument, err error) {
 			csvFields[h] = i
 		}
 	}
-	Log("msg", "field order", "fields", csvFields)
+	logger.Debug("field order", "fields", csvFields)
 
 	for {
 		rec, err = csvr.Read()
@@ -274,7 +272,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types m
 			}
 			parent := lastArgs[level-1]
 			if parent == nil {
-				Log("level", level, "lastArgs", lastArgs, "fun", fun)
+				logger.Debug("nil parent", "level", level, "lastArgs", lastArgs, "fun", fun)
 				panic("parent of " + fun.FullName() + " is nil")
 			}
 			if parent.Flavor == FLAVOR_TABLE {
@@ -292,7 +290,7 @@ func ParseArguments(userArgs [][]UserArgument, filter func(string) bool, types m
 		functions = append(functions, fun)
 		names = append(names, fun.FullName())
 	}
-	Log("functions", names)
+	logger.Debug("ParseArguments", "functions", names)
 	return
 }
 
@@ -377,24 +375,24 @@ func ApplyAnnotations(functions []Function, annotations []Annotation) []Function
 		switch a.Type {
 		case "private":
 			nm := L(a.FullName())
-			Log("private", nm)
+			logger.Debug("name", "private", nm)
 			delete(funcs, nm)
 		case "rename":
 			nm := L(a.FullName())
 			if f := funcs[nm]; f != nil {
 				delete(funcs, nm)
 				funcs[L(a.FullOther())] = f
-				Log("rename", nm, "to", a.Other)
+				logger.Debug("rename", "name", nm, "to", a.Other)
 				f.Alias = a.Other
 			}
 		case "replace", "replace_json":
 			k, v := L(a.FullName()), L(a.FullOther())
 			if f := funcs[k]; f != nil {
-				Log("replace", k, "with", v)
+				logger.Debug("replace", "name", k, "with", v)
 				f.Replacement = funcs[v]
 				f.ReplacementIsJSON = a.Type == "replace_json"
 				delete(funcs, v)
-				Log("delete", v, "add", f.FullName())
+				logger.Debug("delete", "name", v, "add", f.FullName())
 				funcs[L(f.FullName())] = f
 			}
 
@@ -412,7 +410,7 @@ func ApplyAnnotations(functions []Function, annotations []Annotation) []Function
 
 		case "max-table-size":
 			nm := L(a.FullName())
-			Log("max-table-size", nm, "size", a.Size)
+			logger.Debug("max-table-size", "name", nm, "size", a.Size)
 			if f := funcs[nm]; f != nil && a.Size >= f.maxTableSize {
 				f.maxTableSize = a.Size
 			}

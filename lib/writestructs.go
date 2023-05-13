@@ -126,7 +126,7 @@ FunLoop:
 		for _, dir := range []bool{false, true} {
 			if err = fun.SaveStruct(structW, dir); err != nil {
 				if SkipMissingTableOf && (errors.Is(err, ErrMissingTableOf) || errors.Is(err, UnknownSimpleType)) {
-					Log("msg", "SKIP function, missing TableOf info", "function", fun.FullName(), "error", err)
+					logger.Error("SKIP function, missing TableOf info", "function", fun.FullName(), "error", err)
 					continue FunLoop
 				}
 				return err
@@ -137,7 +137,7 @@ FunLoop:
 		io.WriteString(w, plsBlock)
 		io.WriteString(w, "`\n\n")
 		if b, err = format.Source([]byte(callFun)); err != nil {
-			Log("msg", "saving function", "function", fun.FullName(), "error", err)
+			logger.Error("saving function", "function", fun.FullName(), "error", err)
 			os.Stderr.WriteString("\n\n---------------------8<--------------------\n")
 			os.Stderr.WriteString(callFun)
 			os.Stderr.WriteString("\n--------------------->8--------------------\n\n")
@@ -544,7 +544,7 @@ func genChecks(checks []string, arg Argument, base string, parentIsTable bool) [
 			checks = append(checks, "}")
 		}
 	default:
-		Log("msg", "unknown flavor", "flavor", arg.Flavor)
+		logger.Error("unknown flavor", "flavor", arg.Flavor)
 		panic(errors.Errorf("unknown flavor %v", arg.Flavor))
 	}
 	return checks
@@ -659,7 +659,7 @@ func (arg *Argument) goType(isTable bool) (typName string, err error) {
 
 	// FLAVOR_RECORD
 	if false && arg.TypeName == "" {
-		Log("msg", "arg has no TypeName", "arg", arg, "arg", fmt.Sprintf("%#v", arg))
+		logger.Warn("arg has no TypeName", "arg", arg, "arg", fmt.Sprintf("%#v", arg))
 		arg.TypeName = strings.ToLower(arg.Name)
 	}
 	return "*" + typName, nil

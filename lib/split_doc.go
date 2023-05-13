@@ -9,7 +9,6 @@ package genocall
 import (
 	"regexp"
 	"strings"
-	"unicode"
 )
 
 var (
@@ -78,32 +77,4 @@ func getDirDoc(doc string, dirmap direction) argDocs {
 		D.Parse(output)
 	}
 	return D
-}
-
-type argDocs struct {
-	Pre, Post string
-	Docs      []string
-	Map       map[string]string
-}
-
-func (D *argDocs) Parse(doc string) {
-	D.Docs = splitByOffset(doc)
-	for _, line := range D.Docs {
-		sline := strings.TrimSpace(line)
-		if sline == "" || !(sline[0] == '-' || sline[0] == '*') {
-			continue
-		}
-		sline = strings.TrimLeft(sline[1:], " \t")
-		i := strings.IndexAny(sline, "-:")
-		if i < 0 {
-			continue
-		}
-		if D.Map == nil {
-			D.Map = make(map[string]string)
-		}
-		D.Map[strings.TrimRight(sline[:i], " \t")] = strings.TrimLeft(sline[i+1:], " \t")
-	}
-}
-func firstNotSpace(doc string) int {
-	return strings.IndexFunc(doc, func(r rune) bool { return !unicode.IsSpace(r) })
 }

@@ -42,15 +42,6 @@ func (arg PlsType) String() string { return arg.TypeName.String() }
 
 // FromOra retrieves the value of the argument with arg type, from src variable to dst variable.
 func (arg PlsType) FromOra(dst, src, varName string) string {
-	if Gogo {
-		if varName != "" {
-			switch arg.Name {
-			case "DATE", "TIMESTAMP":
-				return fmt.Sprintf("%s = &custom.DateTime{Time:%s}", dst, varName)
-				//return fmt.Sprintf("%s = &custom.DateTime{Time:%s}", dst, varName)
-			}
-		}
-	}
 	switch arg.Name {
 	case "BLOB":
 		if varName != "" {
@@ -75,15 +66,6 @@ func (arg PlsType) FromOra(dst, src, varName string) string {
 }
 
 func (arg PlsType) GetOra(src, varName string) string {
-	if Gogo {
-		switch arg.Name {
-		case "DATE":
-			if varName != "" {
-				return fmt.Sprintf("%s.Format(time.RFC3339)", varName)
-			}
-			return fmt.Sprintf("custom.AsDate(%s)", src)
-		}
-	}
 	switch arg.Name {
 	case "NUMBER":
 		if varName != "" {
@@ -102,24 +84,6 @@ func (arg PlsType) ToOra(dst, src string, dir direction) (expr string, variable 
 	var inTrue string
 	if dir.IsInput() {
 		inTrue = ",In:true"
-	}
-	if Gogo {
-		switch arg.Name {
-		case "DATE":
-			np := strings.TrimPrefix(src, "&")
-			if dir.IsOutput() {
-				if !strings.HasPrefix(dst, "params[") {
-					return fmt.Sprintf(`%s = %s.Time`, dst, np), ""
-				}
-				return fmt.Sprintf(`if %s == nil { %s = new(custom.DateTime) }
-					%s = sql.Out{Dest:&%s.Time%s}`,
-						np, np,
-						dst, strings.TrimPrefix(src, "&"), inTrue,
-					),
-					""
-			}
-			return fmt.Sprintf(`%s = custom.AsDate(%s).Time // toOra D`, dst, np), ""
-		}
 	}
 	switch arg.Name {
 	case "PLS_INTEGER":
