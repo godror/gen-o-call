@@ -448,10 +448,9 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 				continue
 			}
 			if !arg.Type.IsCollection {
-				//name := (CamelCase(arg.Name))
+				name := (CamelCase(arg.Name))
 				//name := capitalize(replHidden(arg.Name))
-				//convIn, convOut = arg.getConvSimple(convIn, convOut, name, addParam(arg.Name))
-				panic("getConvSimple is missing")
+				convIn, convOut = arg.getConvSimple(convIn, convOut, name, addParam(arg.Name))
 				continue
 			}
 
@@ -824,43 +823,45 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 	return
 }
 
-/*
 func (arg Argument) getConvSimple(
 
 	convIn, convOut []string,
 	name, paramName string,
 
-	) ([]string, []string) {
-		if !arg.IsOutput() {
-			in, _ := arg.ToOra(paramName, "input."+name, arg.Direction)
-			convIn = append(convIn, in+"  // gcs4i")
-		} else {
-			got, err := arg.goType()
-			if err != nil {
-				panic(err)
-			}
-			if got[0] == '*' {
-				//convIn = append(convIn, fmt.Sprintf("output.%s = new(%s) // %s  // gcs1", name, got[1:], got))
-				if arg.IsInput() {
-					convIn = append(convIn, fmt.Sprintf(`if input.%s != nil { *output.%s = *input.%s }  // gcs2`, name, name, name))
-				}
-			} else if arg.IsInput() {
-				convIn = append(convIn, fmt.Sprintf(`output.%s = input.%s  // gcs3`, name, name))
-			}
-			if got == "time.Time" {
-				convOut = append(convOut, fmt.Sprintf("if output.%s != nil && output.%s.IsZero() { output.%s = nil }", name, name, name))
-			}
-			src := "output." + name
-			in, varName := arg.ToOra(paramName, "&"+src, arg.Direction)
-			convIn = append(convIn, in)
-			//fmt.Sprintf("%s = sql.Out{Dest:%s,In:%t}  // gcs3", paramName, "&"+src, arg.IsInput()))
-			if varName != "" {
-				convOut = append(convOut,
-					fmt.Sprintf("%s  // gcs4", arg.FromOra(src, paramName, varName)))
-			}
-		}
-		return convIn, convOut
+) ([]string, []string) {
+	if !arg.IsOutput() {
+		in, _ := arg.ToOra(paramName, "input."+name, arg.Direction)
+		return append(convIn, in+"  // gcs4i"), convOut
 	}
+
+	got, err := arg.goType()
+	if err != nil {
+		panic(err)
+	}
+	if got[0] == '*' {
+		//convIn = append(convIn, fmt.Sprintf("output.%s = new(%s) // %s  // gcs1", name, got[1:], got))
+		if arg.IsInput() {
+			convIn = append(convIn, fmt.Sprintf(`if input.%s != nil { *output.%s = *input.%s }  // gcs2`, name, name, name))
+		}
+	} else if arg.IsInput() {
+		convIn = append(convIn, fmt.Sprintf(`output.%s = input.%s  // gcs3`, name, name))
+	}
+	if got == "time.Time" {
+		convOut = append(convOut, fmt.Sprintf("if output.%s != nil && output.%s.IsZero() { output.%s = nil }", name, name, name))
+	}
+	src := "output." + name
+	in, varName := arg.ToOra(paramName, "&"+src, arg.Direction)
+	convIn = append(convIn, in)
+	//fmt.Sprintf("%s = sql.Out{Dest:%s,In:%t}  // gcs3", paramName, "&"+src, arg.IsInput()))
+	if varName != "" {
+		convOut = append(convOut,
+			fmt.Sprintf("%s  // gcs4", arg.FromOra(src, paramName, varName)))
+	}
+
+	return convIn, convOut
+}
+
+/*
 
 func (arg Argument) getConvSimpleTable(
 

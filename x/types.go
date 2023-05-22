@@ -2,10 +2,9 @@
 //
 // SPDX-License-Identifier: UPL-1.0 OR Apache-2.0
 
-package genocall
+package x
 
 import (
-	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"hash/fnv"
@@ -13,33 +12,8 @@ import (
 	"strings"
 )
 
-type PlsType struct {
-	TypeName
-	Attr                       string
-	Charset, IndexBy, TypeCode string
-	Length, Prec, Scale        sql.NullInt64
-	CollectionOf               *PlsType
-	RecordOf                   []*PlsType
-}
-
-type TypeName struct {
-	Owner, Package, Name string
-}
-
-func (tn TypeName) String() string {
-	if tn.Package == "" {
-		return tn.Name
-	}
-	if tn.Owner == "" {
-		return tn.Package + "." + tn.Name
-	}
-	return tn.Owner + "." + tn.Package + "." + tn.Name
-}
-
-func (arg PlsType) String() string { return arg.TypeName.String() }
-
 // FromOra retrieves the value of the argument with arg type, from src variable to dst variable.
-func (arg PlsType) FromOra(dst, src, varName string) string {
+func (arg Attribute) FromOra(dst, src, varName string) string {
 	switch arg.Name {
 	case "BLOB":
 		if varName != "" {
@@ -63,21 +37,8 @@ func (arg PlsType) FromOra(dst, src, varName string) string {
 	return fmt.Sprintf("%s = %s // %s fromOra", dst, src, arg.Name)
 }
 
-func (arg PlsType) GetOra(src, varName string) string {
-	switch arg.Name {
-	case "NUMBER":
-		if varName != "" {
-			//return fmt.Sprintf("string(%s.(godror.Number))", varName)
-			return fmt.Sprintf("custom.AsString(%s)", varName)
-		}
-		//return fmt.Sprintf("string(%s.(godror.Number))", src)
-		return fmt.Sprintf("custom.AsString(%s)", src)
-	}
-	return src
-}
-
 // ToOra adds the value of the argument with arg type, from src variable to dst variable.
-func (arg PlsType) ToOra(dst, src string, dir direction) (expr string, variable string) {
+func (arg Attribute) ToOra(dst, src string, dir direction) (expr string, variable string) {
 	dstVar := mkVarName(dst)
 	var inTrue string
 	if dir.IsInput() {
@@ -107,7 +68,6 @@ func (arg PlsType) ToOra(dst, src string, dir direction) (expr string, variable 
 	}
 	return fmt.Sprintf("%s = %s // %s", dst, src, arg.Name), ""
 }
-
 func mkVarName(dst string) string {
 	h := fnv.New64()
 	io.WriteString(h, dst)
@@ -116,38 +76,3 @@ func mkVarName(dst string) string {
 	hex.Encode(enc[:], h.Sum(raw[:0]))
 	return fmt.Sprintf("var_%s", enc[:])
 }
-
-func ParseDigits(s string, precision, scale int) error {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return nil
-	}
-	if s[0] == '-' || s[0] == '+' {
-		s = s[1:]
-	}
-	var dotSeen bool
-	bucket := precision
-	if precision == 0 && scale == 0 {
-		bucket = 38
-	}
-	for _, r := range s {
-		if !dotSeen && r == '.' {
-			dotSeen = true
-			if !(precision == 0 && scale == 0) {
-				bucket = scale
-			}
-			continue
-		}
-		if '0' <= r && r <= '9' {
-			bucket--
-			if bucket < 0 {
-				return fmt.Errorf("want NUMBER(%d,%d), has %q", precision, scale, s)
-			}
-		} else {
-			return fmt.Errorf("want number, has %c in %q", r, s)
-		}
-	}
-	return nil
-}
-
-// vim: set fileencoding=utf-8 noet:
