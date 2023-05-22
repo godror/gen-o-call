@@ -257,6 +257,7 @@ func demap(plsql, callFun string) (string, string) {
 					}
 					arr := paramsMap[key]
 					if len(arr) == 0 {
+						fmt.Fprintln(os.Stderr, callFun)
 						slog.Info("paramsIdx", "key", key, "val", arr, "map", paramsMap)
 					}
 					i = arr[0]
@@ -277,6 +278,7 @@ func demap(plsql, callFun string) (string, string) {
 	}
 	b, fmtErr := format.Source(callBuf.Bytes())
 	if fmtErr != nil {
+		os.Stderr.Write(callBuf.Bytes())
 		panic(fmtErr)
 	}
 	callBuf.Reset()
@@ -425,7 +427,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 
 	addParam := func(paramName string) string {
 		if paramName == "" {
-			panic("empty param name")
+			paramName = "ret"
 		}
 		return fmt.Sprintf(`params[{{paramsIdx %q}}]`, paramName)
 	}
@@ -435,6 +437,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 		maxTableSize = MaxTableSize
 	}
 	for _, arg := range args {
+		//slog.Info("argument", "arg", arg)
 		if arg.Attribute.Type.IsScalar() {
 			if arg.Attribute.Type.Name == "REF CURSOR" {
 				if arg.IsInput() {
@@ -499,19 +502,22 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 
 		// Object, maybe Collection
 		{
+			aname := CamelCase(arg.Name)
+			if aname == "" {
+				aname = "Ret"
+			}
 			var otnm, objnm, collnm string
 			if arg.IsInput() {
 				otnm = getInnerVarName(fun.FullName(), arg.Name+"OT")
 				convIn = append(convIn,
 					fmt.Sprintf("typName := %q", arg.Type.Name),
 					`
-				`+otnm+`, err := conn.GetObjectType(typName)
+				`+otnm+`, err := conn.GetObjectType(typName)  // in obj
 				if err != nil {
 					return fmt.Errorf("GetObjectType %q: %w", typName, err)
 				}
 				`,
 				)
-				aname := CamelCase(arg.Name)
 
 				if arg.Type.CollectionOf != nil {
 					collnm = getInnerVarName(fun.FullName(), arg.Name+"Coll")
@@ -528,6 +534,9 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						}
 					}
 				`)
+					if !arg.IsOutput() {
+						convIn = append(convIn, addParam(arg.Name)+" = "+collnm+"  // input coll")
+					}
 				} else {
 					objnm = getInnerVarName(fun.FullName(), arg.Name+"Obj")
 					convIn = append(convIn, `
@@ -541,33 +550,45 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 						return fmt.Errorf("%s.Set: %w", typName, err)
 					}
 					`)
+					if !arg.IsOutput() {
+						convIn = append(convIn, addParam(arg.Name)+" = "+objnm+" // input obj")
+					}
 				}
 			}
 
 			if arg.IsOutput() {
-				if otnm == "" {
-					otnm = getInnerVarName(fun.FullName(), arg.Name+"OT")
-					convOut = append(convOut,
-						fmt.Sprintf("typName := %q", arg.Type.Name),
-						`
-				`+otnm+`, err := conn.GetObjectType(typName)
-				if err != nil {
-					return fmt.Errorf("GetObjectType %q: %w", typName, err)
-				}
-				`,
-					)
-				}
 				if arg.Type.CollectionOf != nil {
-					if objnm == "" {
-
+					isIn := "true"
+					if collnm == "" {
+						collnm = getInnerVarName(fun.FullName(), arg.Name+"Coll")
+						isIn = "false"
 					}
-					convOut = append(convOut, `
-						
-					`)
+					convIn = append(convIn, fmt.Sprintf(`
+							var %s godror.Collection
+							%s = sql.Out{Dest: &%s, In: %s}
+							`,
+						collnm,
+						addParam(arg.Name), collnm, isIn))
+					convOut = append(convOut, fmt.Sprintf(`
+						if output.%s, err = %s.AsSlice(output.%s[:0]); err != nil {
+							return err
+						}
+						`, aname, collnm, aname))
 				} else {
-					convOut = append(convOut, `
+					isIn := "true"
+					if objnm == "" {
+						objnm = getInnerVarName(fun.FullName(), arg.Name+"Obj")
+						isIn = "false"
+					}
+					convIn = append(convIn, fmt.Sprintf(`
+							var %s godror.Object
+							%s = sql.Out{Dest: &%s, In: %s}
+							`,
+						objnm,
+						addParam(arg.Name), objnm, isIn))
+					convOut = append(convOut, fmt.Sprintf(`
 								
-					`)
+					`))
 				}
 			}
 		}
