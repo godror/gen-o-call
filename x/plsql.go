@@ -415,8 +415,8 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 	}
 
 	var (
-		vn, tmp, typ string
-		ok           bool
+		vn, typ string
+		ok      bool
 	)
 	decls = append(decls, "i1 PLS_INTEGER;", "i2 PLS_INTEGER;")
 	convIn = append(convIn,
@@ -429,6 +429,7 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 		}
 		return fmt.Sprintf(`params[{{paramsIdx %q}}]`, paramName)
 	}
+	_ = addParam
 	maxTableSize := fun.maxTableSize
 	if maxTableSize <= 0 {
 		maxTableSize = MaxTableSize
@@ -440,17 +441,17 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 					slog.Error("cannot use IN cursor variables", "arg", arg)
 					panic(fmt.Sprintf("cannot use IN cursor variables (%v)", arg))
 				}
-				name := (CamelCase(arg.Name))
+				//name := (CamelCase(arg.Name))
 				//name := capitalize(replHidden(arg.Name))
-				convIn, convOut = arg.getConvSimpleTable(convIn, convOut,
-					name, addParam(arg.Name), maxTableSize)
+				//convIn, convOut = arg.getConvSimpleTable(convIn, convOut, name, addParam(arg.Name), maxTableSize)
+				panic("getConvSimpleTable is missing")
 				continue
 			}
 			if !arg.Type.IsCollection {
-				name := (CamelCase(arg.Name))
+				//name := (CamelCase(arg.Name))
 				//name := capitalize(replHidden(arg.Name))
-				convIn, convOut = arg.getConvSimple(convIn, convOut,
-					name, addParam(arg.Name))
+				//convIn, convOut = arg.getConvSimple(convIn, convOut, name, addParam(arg.Name))
+				panic("getConvSimple is missing")
 				continue
 			}
 
@@ -490,20 +491,22 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 					"END LOOP;",
 					":"+arg.Name+" := "+arg.Name+";")
 			}
-			name := (CamelCase(arg.Name))
+			//name := (CamelCase(arg.Name))
 			//name := capitalize(replHidden(arg.Name))
-			convIn, convOut = arg.getConvSimpleTable(convIn, convOut,
-				name, addParam(arg.Name), maxTableSize)
+			//convIn, convOut = arg.getConvSimpleTable(convIn, convOut, name, addParam(arg.Name), maxTableSize)
+			panic("getConvSimpleTable is missing2")
 			continue
 		}
 
 		// Object, maybe Collection
 		{
+			var otnm, objnm, collnm string
 			if arg.IsInput() {
+				otnm = getInnerVarName(fun.FullName(), arg.Name+"OT")
 				convIn = append(convIn,
 					fmt.Sprintf("typName := %q", arg.Type.Name),
 					`
-				ot, err := conn.GetObjectType(typName)
+				`+otnm+`, err := conn.GetObjectType(typName)
 				if err != nil {
 					return fmt.Errorf("GetObjectType %q: %w", typName, err)
 				}
@@ -512,260 +515,292 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 				aname := CamelCase(arg.Name)
 
 				if arg.Type.CollectionOf != nil {
+					collnm = getInnerVarName(fun.FullName(), arg.Name+"Coll")
 					convIn = append(convIn, `
-					coll, err := ot.NewCollection()
+					`+collnm+`, err := `+otnm+`.NewCollection()
 					if err != nil {
-						ot.Close()
+						`+otnm+`.Close()
 						return fmt.Errorf("%q.NewObject: %w", typName, err)
 					}
 					for i, elt := range input.`+aname+` {
-						if err := coll.Append(elt); err != nil {
-							ot.Close()
+						if err := `+collnm+`.Append(elt); err != nil {
+							`+otnm+`.Close()
 							return fmt.Errorf("%s.Append: %w", typName, err)
 						}
 					}
 				`)
 				} else {
+					objnm = getInnerVarName(fun.FullName(), arg.Name+"Obj")
 					convIn = append(convIn, `
-					obj, err := ot.NewObject()
+					`+objnm+`, err := `+otnm+`.NewObject()
 					if err != nil {
 						close()
 						return fmt.Errorf("%q.NewObject: %w", typName, err)
 					}
-					if err = obj.Set(input.`+aname+`); err != nil {
-						ot.Close()
+					if err = `+objnm+`.Set(input.`+aname+`); err != nil {
+						`+otnm+`.Close()
 						return fmt.Errorf("%s.Set: %w", typName, err)
 					}
 					`)
 				}
 			}
-		}
 
-		switch arg.Flavor {
-
-		case FLAVOR_RECORD:
-			vn = getInnerVarName(fun.FullName(), arg.Name)
-			if arg.TypeName == "" {
-				arg.TypeName = mkRecTypName(arg.Name)
-				decls = append(decls, "TYPE "+arg.TypeName+" IS RECORD (")
-				for i, sub := range arg.RecordOf {
-					var comma string
-					if i != 0 {
-						comma = ","
-					}
-					decls = append(decls, "  "+comma+sub.Name+" "+sub.AbsType)
-				}
-				decls = append(decls, ");")
-			}
-			decls = append(decls, vn+" "+arg.TypeName+"; --E="+arg.Name)
-			callArgs[arg.Name] = vn
-			aname := (CamelCase(arg.Name))
-			//aname := capitalize(replHidden(arg.Name))
 			if arg.IsOutput() {
-				var got string
-				if got, err = arg.goType(); err != nil {
-					return
+				if otnm == "" {
+					otnm = getInnerVarName(fun.FullName(), arg.Name+"OT")
+					convOut = append(convOut,
+						fmt.Sprintf("typName := %q", arg.Type.Name),
+						`
+				`+otnm+`, err := conn.GetObjectType(typName)
+				if err != nil {
+					return fmt.Errorf("GetObjectType %q: %w", typName, err)
 				}
-				if arg.IsInput() {
-					convIn = append(convIn, fmt.Sprintf(`
-					output.%s = new(%s)  // sr1
-					if input.%s != nil { *output.%s = *input.%s }
-					`, aname, withPb(CamelCase(got[1:])),
-						aname, aname, aname))
+				`,
+					)
+				}
+				if arg.Type.CollectionOf != nil {
+					if objnm == "" {
+
+					}
+					convOut = append(convOut, `
+						
+					`)
 				} else {
-					var got string
-					if got, err = arg.goType(); err != nil {
-						return
-					}
-					// yes, convIn - getConvRec uses this!
-					convIn = append(convIn, fmt.Sprintf(`
-                    if output.%s == nil {
-                        output.%s = new(%s)  // sr2
-                    }`, aname,
-						aname, withPb(CamelCase(got[1:]))))
+					convOut = append(convOut, `
+								
+					`)
 				}
 			}
-			for _, a := range arg.RecordOf {
-				a := a
-				k, v := a.Name, a.Argument
-				tmp = getParamName(fun.FullName(), vn+"."+k)
-				kName := (CamelCase(k))
-				//kName := capitalize(replHidden(k))
-				name := aname + "." + kName
-				if arg.IsInput() {
-					pre = append(pre, vn+"."+k+" := :"+tmp+";")
-				}
-				if arg.IsOutput() {
-					post = append(post, ":"+tmp+" := "+vn+"."+k+";")
-				}
-				convIn, convOut = v.getConvRec(convIn, convOut,
-					name, addParam(tmp),
-					0, arg, k, maxTableSize)
-			}
-		case FLAVOR_TABLE:
-			if arg.Type == "REF CURSOR" {
-				if arg.IsInput() {
-					Log("msg", "cannot use IN cursor variables", "arg", arg)
-					panic(fmt.Sprintf("cannot use IN cursor variables (%v)", arg))
-				}
-				name := (CamelCase(arg.Name))
-				//name := capitalize(replHidden(arg.Name))
-				convIn, convOut = arg.getConvSimpleTable(convIn, convOut,
-					name, addParam(arg.Name), maxTableSize)
-			} else {
-				switch arg.TableOf.Flavor {
-				case FLAVOR_SIMPLE: // like simple, but for the arg.TableOf
-					typ = getTableType(arg.TableOf.AbsType)
-					if strings.IndexByte(typ, '/') >= 0 {
-						err = fmt.Errorf("nonsense table type of %s", arg)
-						return
-					}
-
-					setvar := ""
-					if arg.IsInput() {
-						setvar = " := :" + arg.Name
-					}
-					decls = append(decls, arg.Name+" "+typ+setvar+"; --A="+arg.Name)
-
-					vn = getInnerVarName(fun.FullName(), arg.Name)
-					callArgs[arg.Name] = vn
-					decls = append(decls, vn+" "+arg.TypeName+"; --B="+arg.Name)
-					if arg.IsInput() {
-						pre = append(pre,
-							vn+".DELETE;",
-							"i1 := "+arg.Name+".FIRST;",
-							"WHILE i1 IS NOT NULL LOOP",
-							"  "+vn+"(i1) := "+arg.Name+"(i1);",
-							"  i1 := "+arg.Name+".NEXT(i1);",
-							"END LOOP;")
-					}
-					if arg.IsOutput() {
-						post = append(post,
-							arg.Name+".DELETE;",
-							"i1 := "+vn+".FIRST;",
-							"WHILE i1 IS NOT NULL LOOP",
-							"  "+arg.Name+"(i1) := "+vn+"(i1);",
-							"  i1 := "+vn+".NEXT(i1);",
-							"END LOOP;",
-							":"+arg.Name+" := "+arg.Name+";")
-					}
-					name := (CamelCase(arg.Name))
-					//name := capitalize(replHidden(arg.Name))
-					convIn, convOut = arg.getConvSimpleTable(convIn, convOut,
-						name, addParam(arg.Name), maxTableSize)
-
-				case FLAVOR_RECORD:
-					vn = getInnerVarName(fun.FullName(), arg.Name+"."+arg.TableOf.Name)
-					callArgs[arg.Name] = vn
-					decls = append(decls, vn+" "+arg.TypeName+"; --C="+arg.Name)
-
-					aname := (CamelCase(arg.Name))
-					//aname := capitalize(replHidden(arg.Name))
-					if arg.IsOutput() {
-						var tgot string
-						if tgot, err = arg.TableOf.goType(); err != nil {
-							return
-						}
-						st := withPb(CamelCase(tgot))
-						convOut = append(convOut, fmt.Sprintf(`
-					if m := %d - cap(output.%s); m > 0 { // %s
-						output.%s = append(output.%s[:cap(output.%s)], make([]%s, m)...) // fr1
-                    }
-					output.%s = output.%s[:%d]
-					`,
-							maxTableSize, aname, tgot,
-							aname, aname, aname, st,
-							aname, aname, maxTableSize))
-					}
-					if !arg.IsInput() {
-						pre = append(pre, vn+".DELETE;")
-					}
-
-					// declarations go first
-					for _, a := range arg.TableOf.RecordOf {
-						a := a
-						k, v := a.Name, a.Argument
-						typ = getTableType(v.AbsType)
-						if strings.IndexByte(typ, '/') >= 0 {
-							err = fmt.Errorf("nonsense table type of %s", arg)
-							return
-						}
-						decls = append(decls, getParamName(fun.FullName(), vn+"."+k)+" "+typ+"; --D="+arg.Name)
-
-						tmp = getParamName(fun.FullName(), vn+"."+k)
-						if arg.IsInput() {
-							pre = append(pre, tmp+" := :"+tmp+";")
-						} else {
-							pre = append(pre, tmp+".DELETE;")
-						}
-					}
-
-					// here comes the loops
-					var idxvar string
-					for _, a := range arg.TableOf.RecordOf {
-						a := a
-						k, v := a.Name, a.Argument
-
-						tmp = getParamName(fun.FullName(), vn+"."+k)
-
-						if idxvar == "" {
-							idxvar = getParamName(fun.FullName(), vn+"."+k)
-							if arg.IsInput() {
-								pre = append(pre, "",
-									"i1 := "+idxvar+".FIRST;",
-									"WHILE i1 IS NOT NULL LOOP")
-							}
-							if arg.IsOutput() {
-								post = append(post, "",
-									"i1 := "+vn+".FIRST; i2 := 1;",
-									"WHILE i1 IS NOT NULL LOOP")
-							}
-						}
-						kName := (CamelCase(k))
-						//kName := capitalize(replHidden(k))
-						//name := aname + "." + kName
-
-						convIn, convOut = v.getConvTableRec(
-							convIn, convOut,
-							[2]string{aname, kName},
-							addParam(tmp),
-							uint(maxTableSize),
-							k, *arg.TableOf)
-
-						if arg.IsInput() {
-							pre = append(pre,
-								"  "+vn+"(i1)."+k+" := "+tmp+"(i1);")
-						}
-						if arg.IsOutput() {
-							post = append(post,
-								"  "+tmp+"(i2) := "+vn+"(i1)."+k+";")
-						}
-					}
-					if arg.IsInput() {
-						pre = append(pre,
-							"  i1 := "+idxvar+".NEXT(i1);",
-							"END LOOP;")
-					}
-					if arg.IsOutput() {
-						post = append(post,
-							"  i1 := "+vn+".NEXT(i1); i2 := i2 + 1;",
-							"END LOOP;")
-						for _, a := range arg.TableOf.RecordOf {
-							a := a
-							k := a.Name
-							tmp = getParamName(fun.FullName(), vn+"."+k)
-							post = append(post, ":"+tmp+" := "+tmp+";")
-						}
-					}
-				default:
-					Log("msg", "Only table of simple or record types are allowed (no table of table!)", "function", fun.FullName(), "arg", arg.Name)
-					panic(fmt.Errorf("Only table of simple or record types are allowed (no table of table!) - %s(%v)", fun.FullName(), arg.Name))
-				}
-			}
-		default:
-			Log("msg", "unkown flavor", "flavor", arg.Flavor)
-			panic(fmt.Errorf("unknown flavor %s(%v)", fun.FullName(), arg.Name))
 		}
+
+		/*
+			var tmp string
+								switch arg.Flavor {
+
+								case FLAVOR_RECORD:
+									vn = getInnerVarName(fun.FullName(), arg.Name)
+									if arg.TypeName == "" {
+										arg.TypeName = mkRecTypName(arg.Name)
+										decls = append(decls, "TYPE "+arg.TypeName+" IS RECORD (")
+										for i, sub := range arg.RecordOf {
+											var comma string
+											if i != 0 {
+												comma = ","
+											}
+											decls = append(decls, "  "+comma+sub.Name+" "+sub.AbsType)
+										}
+										decls = append(decls, ");")
+									}
+									decls = append(decls, vn+" "+arg.TypeName+"; --E="+arg.Name)
+									callArgs[arg.Name] = vn
+									aname := (CamelCase(arg.Name))
+									//aname := capitalize(replHidden(arg.Name))
+									if arg.IsOutput() {
+										var got string
+										if got, err = arg.goType(); err != nil {
+											return
+										}
+										if arg.IsInput() {
+											convIn = append(convIn, fmt.Sprintf(`
+											output.%s = new(%s)  // sr1
+											if input.%s != nil { *output.%s = *input.%s }
+											`, aname, withPb(CamelCase(got[1:])),
+												aname, aname, aname))
+										} else {
+											var got string
+											if got, err = arg.goType(); err != nil {
+												return
+											}
+											// yes, convIn - getConvRec uses this!
+											convIn = append(convIn, fmt.Sprintf(`
+						                    if output.%s == nil {
+						                        output.%s = new(%s)  // sr2
+						                    }`, aname,
+												aname, withPb(CamelCase(got[1:]))))
+										}
+									}
+									for _, a := range arg.RecordOf {
+										a := a
+										k, v := a.Name, a.Argument
+										tmp = getParamName(fun.FullName(), vn+"."+k)
+										kName := (CamelCase(k))
+										//kName := capitalize(replHidden(k))
+										name := aname + "." + kName
+										if arg.IsInput() {
+											pre = append(pre, vn+"."+k+" := :"+tmp+";")
+										}
+										if arg.IsOutput() {
+											post = append(post, ":"+tmp+" := "+vn+"."+k+";")
+										}
+										convIn, convOut = v.getConvRec(convIn, convOut,
+											name, addParam(tmp),
+											0, arg, k, maxTableSize)
+									}
+								case FLAVOR_TABLE:
+									if arg.Type == "REF CURSOR" {
+										if arg.IsInput() {
+											Log("msg", "cannot use IN cursor variables", "arg", arg)
+											panic(fmt.Sprintf("cannot use IN cursor variables (%v)", arg))
+										}
+										name := (CamelCase(arg.Name))
+										//name := capitalize(replHidden(arg.Name))
+										convIn, convOut = arg.getConvSimpleTable(convIn, convOut,
+											name, addParam(arg.Name), maxTableSize)
+									} else {
+										switch arg.TableOf.Flavor {
+										case FLAVOR_SIMPLE: // like simple, but for the arg.TableOf
+											typ = getTableType(arg.TableOf.AbsType)
+											if strings.IndexByte(typ, '/') >= 0 {
+												err = fmt.Errorf("nonsense table type of %s", arg)
+												return
+											}
+
+											setvar := ""
+											if arg.IsInput() {
+												setvar = " := :" + arg.Name
+											}
+											decls = append(decls, arg.Name+" "+typ+setvar+"; --A="+arg.Name)
+
+											vn = getInnerVarName(fun.FullName(), arg.Name)
+											callArgs[arg.Name] = vn
+											decls = append(decls, vn+" "+arg.TypeName+"; --B="+arg.Name)
+											if arg.IsInput() {
+												pre = append(pre,
+													vn+".DELETE;",
+													"i1 := "+arg.Name+".FIRST;",
+													"WHILE i1 IS NOT NULL LOOP",
+													"  "+vn+"(i1) := "+arg.Name+"(i1);",
+													"  i1 := "+arg.Name+".NEXT(i1);",
+													"END LOOP;")
+											}
+											if arg.IsOutput() {
+												post = append(post,
+													arg.Name+".DELETE;",
+													"i1 := "+vn+".FIRST;",
+													"WHILE i1 IS NOT NULL LOOP",
+													"  "+arg.Name+"(i1) := "+vn+"(i1);",
+													"  i1 := "+vn+".NEXT(i1);",
+													"END LOOP;",
+													":"+arg.Name+" := "+arg.Name+";")
+											}
+											name := (CamelCase(arg.Name))
+											//name := capitalize(replHidden(arg.Name))
+											convIn, convOut = arg.getConvSimpleTable(convIn, convOut,
+												name, addParam(arg.Name), maxTableSize)
+
+										case FLAVOR_RECORD:
+											vn = getInnerVarName(fun.FullName(), arg.Name+"."+arg.TableOf.Name)
+											callArgs[arg.Name] = vn
+											decls = append(decls, vn+" "+arg.TypeName+"; --C="+arg.Name)
+
+											aname := (CamelCase(arg.Name))
+											//aname := capitalize(replHidden(arg.Name))
+											if arg.IsOutput() {
+												var tgot string
+												if tgot, err = arg.TableOf.goType(); err != nil {
+													return
+												}
+												st := withPb(CamelCase(tgot))
+												convOut = append(convOut, fmt.Sprintf(`
+											if m := %d - cap(output.%s); m > 0 { // %s
+												output.%s = append(output.%s[:cap(output.%s)], make([]%s, m)...) // fr1
+						                    }
+											output.%s = output.%s[:%d]
+											`,
+													maxTableSize, aname, tgot,
+													aname, aname, aname, st,
+													aname, aname, maxTableSize))
+											}
+											if !arg.IsInput() {
+												pre = append(pre, vn+".DELETE;")
+											}
+
+											// declarations go first
+											for _, a := range arg.TableOf.RecordOf {
+												a := a
+												k, v := a.Name, a.Argument
+												typ = getTableType(v.AbsType)
+												if strings.IndexByte(typ, '/') >= 0 {
+													err = fmt.Errorf("nonsense table type of %s", arg)
+													return
+												}
+												decls = append(decls, getParamName(fun.FullName(), vn+"."+k)+" "+typ+"; --D="+arg.Name)
+
+												tmp = getParamName(fun.FullName(), vn+"."+k)
+												if arg.IsInput() {
+													pre = append(pre, tmp+" := :"+tmp+";")
+												} else {
+													pre = append(pre, tmp+".DELETE;")
+												}
+											}
+
+											// here comes the loops
+											var idxvar string
+											for _, a := range arg.TableOf.RecordOf {
+												a := a
+												k, v := a.Name, a.Argument
+
+												tmp = getParamName(fun.FullName(), vn+"."+k)
+
+												if idxvar == "" {
+													idxvar = getParamName(fun.FullName(), vn+"."+k)
+													if arg.IsInput() {
+														pre = append(pre, "",
+															"i1 := "+idxvar+".FIRST;",
+															"WHILE i1 IS NOT NULL LOOP")
+													}
+													if arg.IsOutput() {
+														post = append(post, "",
+															"i1 := "+vn+".FIRST; i2 := 1;",
+															"WHILE i1 IS NOT NULL LOOP")
+													}
+												}
+												kName := (CamelCase(k))
+												//kName := capitalize(replHidden(k))
+												//name := aname + "." + kName
+
+												convIn, convOut = v.getConvTableRec(
+													convIn, convOut,
+													[2]string{aname, kName},
+													addParam(tmp),
+													uint(maxTableSize),
+													k, *arg.TableOf)
+
+												if arg.IsInput() {
+													pre = append(pre,
+														"  "+vn+"(i1)."+k+" := "+tmp+"(i1);")
+												}
+												if arg.IsOutput() {
+													post = append(post,
+														"  "+tmp+"(i2) := "+vn+"(i1)."+k+";")
+												}
+											}
+											if arg.IsInput() {
+												pre = append(pre,
+													"  i1 := "+idxvar+".NEXT(i1);",
+													"END LOOP;")
+											}
+											if arg.IsOutput() {
+												post = append(post,
+													"  i1 := "+vn+".NEXT(i1); i2 := i2 + 1;",
+													"END LOOP;")
+												for _, a := range arg.TableOf.RecordOf {
+													a := a
+													k := a.Name
+													tmp = getParamName(fun.FullName(), vn+"."+k)
+													post = append(post, ":"+tmp+" := "+tmp+";")
+												}
+											}
+										default:
+											Log("msg", "Only table of simple or record types are allowed (no table of table!)", "function", fun.FullName(), "arg", arg.Name)
+											panic(fmt.Errorf("Only table of simple or record types are allowed (no table of table!) - %s(%v)", fun.FullName(), arg.Name))
+										}
+									}
+								default:
+									Log("msg", "unkown flavor", "flavor", arg.Flavor)
+									panic(fmt.Errorf("unknown flavor %s(%v)", fun.FullName(), arg.Name))
+								}
+		*/
 	}
 
 	callb := Buffers.Get()
@@ -789,209 +824,215 @@ func (fun Function) prepareCall() (decls, pre []string, call string, post []stri
 	return
 }
 
+/*
 func (arg Argument) getConvSimple(
+
 	convIn, convOut []string,
 	name, paramName string,
-) ([]string, []string) {
-	if !arg.IsOutput() {
-		in, _ := arg.ToOra(paramName, "input."+name, arg.Direction)
-		convIn = append(convIn, in+"  // gcs4i")
-	} else {
-		got, err := arg.goType()
-		if err != nil {
-			panic(err)
-		}
-		if got[0] == '*' {
-			//convIn = append(convIn, fmt.Sprintf("output.%s = new(%s) // %s  // gcs1", name, got[1:], got))
-			if arg.IsInput() {
-				convIn = append(convIn, fmt.Sprintf(`if input.%s != nil { *output.%s = *input.%s }  // gcs2`, name, name, name))
+
+	) ([]string, []string) {
+		if !arg.IsOutput() {
+			in, _ := arg.ToOra(paramName, "input."+name, arg.Direction)
+			convIn = append(convIn, in+"  // gcs4i")
+		} else {
+			got, err := arg.goType()
+			if err != nil {
+				panic(err)
 			}
-		} else if arg.IsInput() {
-			convIn = append(convIn, fmt.Sprintf(`output.%s = input.%s  // gcs3`, name, name))
+			if got[0] == '*' {
+				//convIn = append(convIn, fmt.Sprintf("output.%s = new(%s) // %s  // gcs1", name, got[1:], got))
+				if arg.IsInput() {
+					convIn = append(convIn, fmt.Sprintf(`if input.%s != nil { *output.%s = *input.%s }  // gcs2`, name, name, name))
+				}
+			} else if arg.IsInput() {
+				convIn = append(convIn, fmt.Sprintf(`output.%s = input.%s  // gcs3`, name, name))
+			}
+			if got == "time.Time" {
+				convOut = append(convOut, fmt.Sprintf("if output.%s != nil && output.%s.IsZero() { output.%s = nil }", name, name, name))
+			}
+			src := "output." + name
+			in, varName := arg.ToOra(paramName, "&"+src, arg.Direction)
+			convIn = append(convIn, in)
+			//fmt.Sprintf("%s = sql.Out{Dest:%s,In:%t}  // gcs3", paramName, "&"+src, arg.IsInput()))
+			if varName != "" {
+				convOut = append(convOut,
+					fmt.Sprintf("%s  // gcs4", arg.FromOra(src, paramName, varName)))
+			}
 		}
-		if got == "time.Time" {
-			convOut = append(convOut, fmt.Sprintf("if output.%s != nil && output.%s.IsZero() { output.%s = nil }", name, name, name))
-		}
-		src := "output." + name
-		in, varName := arg.ToOra(paramName, "&"+src, arg.Direction)
-		convIn = append(convIn, in)
-		//fmt.Sprintf("%s = sql.Out{Dest:%s,In:%t}  // gcs3", paramName, "&"+src, arg.IsInput()))
-		if varName != "" {
-			convOut = append(convOut,
-				fmt.Sprintf("%s  // gcs4", arg.FromOra(src, paramName, varName)))
-		}
+		return convIn, convOut
 	}
-	return convIn, convOut
-}
 
 func (arg Argument) getConvSimpleTable(
+
 	convIn, convOut []string,
 	name, paramName string,
 	tableSize int,
-) ([]string, []string) {
-	if arg.IsOutput() {
+
+	) ([]string, []string) {
+		if arg.IsOutput() {
+			got, err := arg.goType()
+			if err != nil {
+				panic(err)
+			}
+			if arg.Type == "REF CURSOR" {
+				return arg.getConvRefCursor(convIn, convOut, name, paramName, tableSize)
+			}
+			if strings.HasPrefix(got, "*[]") { // FIXME(tgulacsi): just a hack, ProtoBuf never generates a pointer to a slice
+				got = got[1:]
+			}
+			if false {
+				if got == "*[]string" {
+					got = "[]string"
+				}
+			}
+			if got[0] == '*' {
+				convIn = append(convIn, fmt.Sprintf(`
+			if output.%s == nil { // %#v
+				x := make(%s, 0, %d)
+				output.%s = &x
+			} else if cap((*output.%s)) < %d { // simpletable
+				*output.%s = make(%s, 0, %d)
+			} else {
+				*(output.%s) = (*output.%s)[:0]
+			}`, name, arg,
+					strings.TrimLeft(got, "*"), tableSize,
+					name,
+					name, tableSize,
+					name, strings.TrimLeft(got, "*"), tableSize,
+					name, name))
+				if arg.IsInput() {
+					convIn = append(convIn, fmt.Sprintf(`*output.%s = append(*output.%s, input.%s)`, name, name, name))
+				}
+			} else {
+				if arg.IsInput() {
+					convIn = append(convIn, fmt.Sprintf("output.%s = input.%s", name, name))
+				} else {
+					got = CamelCase(got)
+					if got == "[]godror.Number" {
+						convIn = append(convIn,
+							fmt.Sprintf("output.%s = make([]string, 0, %d) // gcst3", name, tableSize))
+					} else {
+						convIn = append(convIn,
+							fmt.Sprintf("output.%s = make(%s, 0, %d) // gcst3", name, got, tableSize))
+					}
+				}
+			}
+			in, varName := arg.ToOra(
+				strings.Replace(strings.Replace(paramName, `[{{paramsIdx "`, "__", 1), `"}}]`, "", 1),
+				"output."+name,
+				arg.Direction)
+			convIn = append(convIn,
+				//fmt.Sprintf(`if cap(input.%s) == 0 { input.%s = append(input.%s, make(%s, 1)...)[:0] }`, name, name, name, arg.goType()[1:]),
+				fmt.Sprintf(`// in=%q varName=%q`, in, varName))
+			if got == "[]godror.Number" { // don't copy, hack
+				convIn = append(convIn,
+					fmt.Sprintf(`if cap(output.%s) == 0 { output.%s = make([]string, 0, %d) }`, name, name, tableSize),
+					fmt.Sprintf(`%s = sql.Out{Dest: custom.NumbersFromStrings(&output.%s)}  // gcst1`, paramName, name))
+			} else {
+				convIn = append(convIn, fmt.Sprintf(`%s = output.%s // gcst1`, paramName, name))
+			}
+		} else {
+			in, varName := arg.ToOra(
+				strings.Replace(strings.Replace(paramName, `[{{paramsIdx "`, "__", 1), `"}}]`, "", 1),
+				"output."+name,
+				arg.Direction)
+			convIn = append(convIn,
+				fmt.Sprintf(`// in=%q varName=%q`, in, varName))
+			if got, _ := arg.goType(); got == "[]godror.Number" {
+				convIn = append(convIn,
+					fmt.Sprintf(`if len(input.%s) == 0 { %s = []godror.Number{} } else {
+				%s = *custom.NumbersFromStrings(&input.%s) // gcst2
+			}`,
+						name, paramName,
+						paramName, name))
+			} else {
+				convIn = append(convIn, fmt.Sprintf("%s = input.%s // gcst2", paramName, name))
+			}
+		}
+		return convIn, convOut
+	}
+
+func (arg Argument) getConvRefCursor(
+
+	convIn, convOut []string,
+	name, paramName string,
+	tableSize int,
+
+	) ([]string, []string) {
 		got, err := arg.goType()
 		if err != nil {
 			panic(err)
 		}
-		if arg.Type == "REF CURSOR" {
-			return arg.getConvRefCursor(convIn, convOut, name, paramName, tableSize)
-		}
-		if strings.HasPrefix(got, "*[]") { // FIXME(tgulacsi): just a hack, ProtoBuf never generates a pointer to a slice
-			got = got[1:]
-		}
-		if false {
-			if got == "*[]string" {
-				got = "[]string"
-			}
-		}
-		if got[0] == '*' {
-			convIn = append(convIn, fmt.Sprintf(`
-		if output.%s == nil { // %#v
-			x := make(%s, 0, %d)
-			output.%s = &x
-		} else if cap((*output.%s)) < %d { // simpletable
-			*output.%s = make(%s, 0, %d)
-		} else {
-			*(output.%s) = (*output.%s)[:0]
-		}`, name, arg,
-				strings.TrimLeft(got, "*"), tableSize,
-				name,
-				name, tableSize,
-				name, strings.TrimLeft(got, "*"), tableSize,
-				name, name))
-			if arg.IsInput() {
-				convIn = append(convIn, fmt.Sprintf(`*output.%s = append(*output.%s, input.%s)`, name, name, name))
-			}
-		} else {
-			if arg.IsInput() {
-				convIn = append(convIn, fmt.Sprintf("output.%s = input.%s", name, name))
-			} else {
-				got = CamelCase(got)
-				if got == "[]godror.Number" {
-					convIn = append(convIn,
-						fmt.Sprintf("output.%s = make([]string, 0, %d) // gcst3", name, tableSize))
-				} else {
-					convIn = append(convIn,
-						fmt.Sprintf("output.%s = make(%s, 0, %d) // gcst3", name, got, tableSize))
+		GoT := withPb(CamelCase(got))
+		convIn = append(convIn, fmt.Sprintf(`output.%s = make([]%s, 0, %d)  // gcrf1
+			%s = sql.Out{Dest:new(driver.Rows)} // gcrf1 %q`,
+			name, GoT, tableSize,
+			paramName, got))
+
+		convOut = append(convOut, fmt.Sprintf(`
+		{
+			rset := *(%s.(sql.Out).Dest.(*driver.Rows))
+			if rset != nil { defer rset.Close() }
+			iterators = append(iterators, iterator{
+				Reset: func() { output.%s = nil },
+				Iterate: func() error {
+			a := output.%s[:0]
+			I := make([]driver.Value, %d)
+			var err error
+			for i := 0; i < %d; i++ {
+				if err = rset.Next(I); err != nil {
+					break
 				}
+				a = append(a, %s)
 			}
-		}
-		in, varName := arg.ToOra(
-			strings.Replace(strings.Replace(paramName, `[{{paramsIdx "`, "__", 1), `"}}]`, "", 1),
-			"output."+name,
-			arg.Direction)
-		convIn = append(convIn,
-			//fmt.Sprintf(`if cap(input.%s) == 0 { input.%s = append(input.%s, make(%s, 1)...)[:0] }`, name, name, name, arg.goType()[1:]),
-			fmt.Sprintf(`// in=%q varName=%q`, in, varName))
-		if got == "[]godror.Number" { // don't copy, hack
-			convIn = append(convIn,
-				fmt.Sprintf(`if cap(output.%s) == 0 { output.%s = make([]string, 0, %d) }`, name, name, tableSize),
-				fmt.Sprintf(`%s = sql.Out{Dest: custom.NumbersFromStrings(&output.%s)}  // gcst1`, paramName, name))
-		} else {
-			convIn = append(convIn, fmt.Sprintf(`%s = output.%s // gcst1`, paramName, name))
-		}
-	} else {
-		in, varName := arg.ToOra(
-			strings.Replace(strings.Replace(paramName, `[{{paramsIdx "`, "__", 1), `"}}]`, "", 1),
-			"output."+name,
-			arg.Direction)
-		convIn = append(convIn,
-			fmt.Sprintf(`// in=%q varName=%q`, in, varName))
-		if got, _ := arg.goType(); got == "[]godror.Number" {
-			convIn = append(convIn,
-				fmt.Sprintf(`if len(input.%s) == 0 { %s = []godror.Number{} } else {
-			%s = *custom.NumbersFromStrings(&input.%s) // gcst2
+			output.%s = a
+			return err
+			},
+			})
 		}`,
-					name, paramName,
-					paramName, name))
-		} else {
-			convIn = append(convIn, fmt.Sprintf("%s = input.%s // gcst2", paramName, name))
-		}
+			paramName,
+			name,
+			name,
+			len(arg.TableOf.RecordOf),
+			batchSize,
+			arg.getFromRset("I"),
+			name,
+		))
+		return convIn, convOut
 	}
-	return convIn, convOut
-}
 
-func (arg Argument) getConvRefCursor(
-	convIn, convOut []string,
-	name, paramName string,
-	tableSize int,
-) ([]string, []string) {
-	got, err := arg.goType()
-	if err != nil {
-		panic(err)
-	}
-	GoT := withPb(CamelCase(got))
-	convIn = append(convIn, fmt.Sprintf(`output.%s = make([]%s, 0, %d)  // gcrf1
-		%s = sql.Out{Dest:new(driver.Rows)} // gcrf1 %q`,
-		name, GoT, tableSize,
-		paramName, got))
+	func (arg Argument) getFromRset(rsetRow string) string {
+		buf := Buffers.Get()
+		defer Buffers.Put(buf)
 
-	convOut = append(convOut, fmt.Sprintf(`
-	{
-		rset := *(%s.(sql.Out).Dest.(*driver.Rows))
-		if rset != nil { defer rset.Close() }
-		iterators = append(iterators, iterator{
-			Reset: func() { output.%s = nil },
-			Iterate: func() error {
-		a := output.%s[:0]
-		I := make([]driver.Value, %d)
-		var err error
-		for i := 0; i < %d; i++ {
-			if err = rset.Next(I); err != nil {
-				break
-			}
-			a = append(a, %s)
-		}
-		output.%s = a
-		return err
-		},
-		})
-	}`,
-		paramName,
-		name,
-		name,
-		len(arg.TableOf.RecordOf),
-		batchSize,
-		arg.getFromRset("I"),
-		name,
-	))
-	return convIn, convOut
-}
-
-func (arg Argument) getFromRset(rsetRow string) string {
-	buf := Buffers.Get()
-	defer Buffers.Put(buf)
-
-	got, err := arg.goType()
-	if err != nil {
-		panic(err)
-	}
-	GoT := CamelCase(got)
-	if GoT[0] == '*' {
-		GoT = "&" + GoT[1:]
-	}
-	fmt.Fprintf(buf, "%s{\n", withPb(GoT))
-	for i, a := range arg.TableOf.RecordOf {
-		a := a
-		got, err = a.Argument.goType()
+		got, err := arg.goType()
 		if err != nil {
 			panic(err)
 		}
-		if strings.Contains(got, ".") {
-			fmt.Fprintf(buf, "\t%s: %s, // %s\n", CamelCase(a.Name),
-				a.GetOra(fmt.Sprintf("%s[%d]", rsetRow, i), ""),
-				got)
-		} else {
-			fmt.Fprintf(buf, "\t%s: custom.As%s(%s[%d]), // %s\n", CamelCase(a.Name), CamelCase(got), rsetRow, i,
-				got)
+		GoT := CamelCase(got)
+		if GoT[0] == '*' {
+			GoT = "&" + GoT[1:]
 		}
+		fmt.Fprintf(buf, "%s{\n", withPb(GoT))
+		for i, a := range arg.Type.CollectionOf.Attributes {
+			a := a
+			got, err = a.goTypeName()
+			if err != nil {
+				panic(err)
+			}
+			if strings.Contains(got, ".") {
+				fmt.Fprintf(buf, "\t%s: %s, // %s\n", CamelCase(a.Name),
+					a.GetOra(fmt.Sprintf("%s[%d]", rsetRow, i), ""),
+					got)
+			} else {
+				fmt.Fprintf(buf, "\t%s: custom.As%s(%s[%d]), // %s\n", CamelCase(a.Name), CamelCase(got), rsetRow, i,
+					got)
+			}
+		}
+		fmt.Fprintf(buf, "}")
+		return buf.String()
 	}
-	fmt.Fprintf(buf, "}")
-	return buf.String()
-}
 
-/*
 	func getOutConvTSwitch(name, pTyp string) string {
 		parse := ""
 		if strings.HasPrefix(pTyp, "int") {
@@ -1034,7 +1075,6 @@ func (arg Argument) getFromRset(rsetRow string) string {
 						return
 					}`, pTyp, name, pTyp)
 	}
-*/
 func (arg Argument) getConvRec(
 	convIn, convOut []string,
 	name, paramName string,
@@ -1156,6 +1196,7 @@ func (arg Argument) getConvTableRec(
 	}
 	return convIn, convOut
 }
+*/
 
 var varNames = make(map[string]map[string]string, 4)
 
