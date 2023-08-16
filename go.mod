@@ -25,7 +25,7 @@ require (
 )
 
 require (
-	github.com/UNO-SOFT/zlog v0.7.4 // indirect
+	github.com/UNO-SOFT/zlog v0.7.6 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
